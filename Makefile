@@ -3,6 +3,7 @@
 EXE = main
 SRCS := src/main.cpp \
   src/camera.cpp \
+  src/encoder_config.cpp \
   lib/cpp-logging/logging.cpp \
 
 OBJS := $(SRCS:%.cpp=%.o)
@@ -14,6 +15,11 @@ INCDIRS := -Iinclude \
 CFLAGS += -Wall -MD -std=gnu99 -g $(INCDIRS)
 CXXFLAGS += -Wall -MD -std=gnu++11 -g $(INCDIRS)
 LDFLAGS += -Wall -g
+
+ifdef WERROR
+    CFLAGS += -Werror
+    CXXFLAGS += -Werror
+endif
 
 # mmal
 CFLAGS += $(shell pkg-config --cflags mmal)
