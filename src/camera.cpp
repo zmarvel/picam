@@ -606,7 +606,7 @@ MMAL_STATUS_T Camera::createBufferPools() {
     splitterRawPool = mmal_port_pool_create(splitterOutput,
                                             splitterOutput->buffer_num,
                                             splitterOutput->buffer_size);
-    if (splitterEncodedPool == nullptr) {
+    if (splitterRawPool == nullptr) {
       Logger::error(__func__, "Failed to allocate splitter output[0] buffer pool\n");
       return MMAL_ENOMEM;
     }
