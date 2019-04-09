@@ -17,7 +17,6 @@ enum class PortType {
   PREVIEW,
   VIDEO,
   STILL,
-  SPLITTER,
 };
 
 
@@ -65,15 +64,10 @@ class Camera {
      * messages from the underlying driver.
      */
     static void controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
-    static void splitterRawCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
     static void encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
 
     MMAL_COMPONENT_T* getCamera() const {
       return camera;
-    }
-
-    MMAL_COMPONENT_T* getSplitter() const {
-      return splitter;
     }
 
     MMAL_COMPONENT_T* getEncoder() const {
@@ -81,9 +75,6 @@ class Camera {
     }
 
     MMAL_PORT_T* getVideoOutputPort() const;
-    MMAL_PORT_T* getSplitterInputPort() const;
-    MMAL_PORT_T* getSplitterRawOutputPort() const;
-    MMAL_PORT_T* getSplitterEncodedOutputPort() const;
     MMAL_PORT_T* getEncoderInputPort() const;
     MMAL_PORT_T* getEncoderOutputPort() const;
 
@@ -93,15 +84,12 @@ class Camera {
      */
     MMAL_STATUS_T createBufferPools();
     MMAL_POOL_T* getVideoBufferPool();
-    MMAL_POOL_T* getSplitterEncodedBufferPool();
-    MMAL_POOL_T* getSplitterRawBufferPool();
     MMAL_POOL_T* getEncoderBufferPool();
 
     /**
      * Enable the camera, splitter, and encoder components.
      */
     MMAL_STATUS_T enableCamera();
-    MMAL_STATUS_T enableSplitter();
     MMAL_STATUS_T enableEncoder();
 
     /**
@@ -149,7 +137,6 @@ class Camera {
     MMAL_STATUS_T open(SensorMode mode);
 
     MMAL_STATUS_T configurePreview();
-    MMAL_STATUS_T configureSplitter();
     MMAL_STATUS_T configureEncoder(H264EncoderConfig& cfg);
 
     MMAL_STATUS_T setSensorMode(SensorMode mode);
@@ -309,17 +296,14 @@ class Camera {
 
     // Components
     MMAL_COMPONENT_T* camera;
-    MMAL_COMPONENT_T* splitter;
     MMAL_COMPONENT_T* encoder;
     MMAL_COMPONENT_T* preview;
 
     // Buffer pools
-    MMAL_POOL_T* splitterRawPool;
     MMAL_POOL_T* encoderPool;
 
     // Connections
-    MMAL_CONNECTION_T* videoSplitterConnection;
-    MMAL_CONNECTION_T* splitterEncoderConnection;
+    MMAL_CONNECTION_T* videoEncoderConnection;
 
     std::ofstream encodedOutput;
     bool encodedOutputOpen;

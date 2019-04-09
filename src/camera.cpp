@@ -34,13 +34,10 @@ static const std::string CAMERA_NS = "Camera: ";
 Camera::Camera(int cameraNum)
   : cameraNum{cameraNum}
   , camera{nullptr}
-  , splitter{nullptr}
   , encoder{nullptr}
   , preview{nullptr}
-  , splitterRawPool{nullptr}
   , encoderPool{nullptr}
-  , videoSplitterConnection{nullptr}
-  , splitterEncoderConnection{nullptr}
+  , videoEncoderConnection{nullptr}
   , encodedOutput{}
   , encodedOutputOpen{false}
 {
@@ -48,18 +45,12 @@ Camera::Camera(int cameraNum)
 
 Camera::~Camera() {
   // Clean up connections
-  if ((splitterEncoderConnection != nullptr) && (mmal_connection_destroy(splitterEncoderConnection) != MMAL_SUCCESS)) {
-    Logger::warning(__func__, "failed to destroy splitter -> encoder connection\n");
-  }
-  if ((videoSplitterConnection != nullptr) && (mmal_connection_destroy(videoSplitterConnection) != MMAL_SUCCESS)) {
-    Logger::warning(__func__, "failed to destroy video -> splitter connection\n");
+  if ((videoEncoderConnection != nullptr) && (mmal_connection_destroy(videoEncoderConnection) != MMAL_SUCCESS)) {
+    Logger::warning(__func__, "failed to destroy video -> encoder connection\n");
   }
 
 
   // Clean up pools
-  if (splitterRawPool != nullptr) {
-    mmal_pool_destroy(splitterRawPool);
-  }
   if (encoderPool != nullptr) {
     mmal_pool_destroy(encoderPool);
   }
@@ -68,10 +59,6 @@ Camera::~Camera() {
   // Clean up components
   if ((camera != nullptr) && (mmal_component_destroy(camera) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to destroy camera component\n");
-  }
-
-  if ((splitter != nullptr) && (mmal_component_destroy(splitter) != MMAL_SUCCESS)) {
-    Logger::warning(__func__, "failed to destroy splitter component\n");
   }
 
   if ((encoder != nullptr) && (mmal_component_destroy(encoder) != MMAL_SUCCESS)) {
@@ -127,24 +114,6 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
   }
 
   //
-  // Set up the splitter
-  //
-
-  status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_SPLITTER, &splitter);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "failed to allocate splitter resources\n");
-    return status;
-  }
-
-  if (splitter->input_num < 1) {
-    Logger::error(CAMERA_NS, "invalid splitter input number\n");
-    return MMAL_ENOSYS;
-  } else if (splitter->output_num < 2) {
-    Logger::error(CAMERA_NS, "invalid splitter output number\n");
-    return MMAL_ENOSYS;
-  }
-
-  //
   // Set up the encoder
   //
 
@@ -178,74 +147,6 @@ MMAL_STATUS_T Camera::configurePreview() {
   }
 
   return status;
-}
-
-MMAL_STATUS_T Camera::configureSplitter() {
-  // Configure splitter input format
-  mmal_format_copy(getSplitterInputPort()->format,
-                   getVideoOutputPort()->format);
-
-  MMAL_PORT_T* splitterInput = getSplitterInputPort();
-  if (splitterInput->buffer_num < 3) {
-    splitterInput->buffer_num = 3;
-  }
-
-  MMAL_STATUS_T status = mmal_port_format_commit(getSplitterInputPort());
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to set splitter input[0]\n");
-    return status;
-  }
-
-  // Splitter output formats
-
-  // Output 0 will be used for raw output
-  mmal_format_copy(getSplitterRawOutputPort()->format,
-                   splitterInput->format);
-  MMAL_ES_FORMAT_T* fmt = getSplitterRawOutputPort()->format;
-  fmt->encoding = MMAL_ENCODING_I420;
-  fmt->encoding_variant = MMAL_ENCODING_I420;
-  fmt->es->video.frame_rate.num = 0;
-  fmt->es->video.frame_rate.den = 1;
-  status = mmal_port_format_commit(getSplitterRawOutputPort());
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to set splitter output[0]\n");
-    return status;
-  }
-
-  // Output 1 will be sent to the H264 encoder, so it will be left the same
-  // as the input stream
-  mmal_format_copy(getSplitterEncodedOutputPort()->format, splitterInput->format);
-  fmt = getSplitterEncodedOutputPort()->format;
-  fmt->encoding = MMAL_ENCODING_OPAQUE;
-  fmt->encoding_variant = 0;
-  fmt->es->video.frame_rate.num = 0;
-  fmt->es->video.frame_rate.den = 1;
-  status = mmal_port_format_commit(getSplitterEncodedOutputPort());
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to set splitter output[1]\n");
-    return status;
-  }
-
-  // Output 2 will be left the same as the input stream
-  mmal_format_copy(getSplitter()->output[2]->format, splitterInput->format);
-  fmt = getSplitter()->output[2]->format;
-  fmt->es->video.frame_rate.num = 0;
-  fmt->es->video.frame_rate.den = 1;
-  status = mmal_port_format_commit(getSplitter()->output[2]);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to set splitter output[2]\n");
-    return status;
-  }
-
-  if (getSplitterRawOutputPort()->buffer_num < 3) {
-    getSplitterRawOutputPort()->buffer_num = 3;
-  }
-  if (getSplitterEncodedOutputPort()->buffer_num < 3) {
-    getSplitterEncodedOutputPort()->buffer_num = 3;
-  }
-
-  return status;
-
 }
 
 MMAL_STATUS_T Camera::configureEncoder(H264EncoderConfig& cfg) {
@@ -496,23 +397,6 @@ void Camera::controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   Logger::debug(CAMERA_NS, "Camera::controlCallback called with cmd=0x%x\n", buffer->cmd);
 }
 
-void Camera::splitterRawCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
-  Logger::debug(__func__, "Got %u B\n", buffer->length);
-  mmal_buffer_header_release(buffer);
-
-  Camera* pCamera = reinterpret_cast<Camera*>(port->userdata);
-
-  if (port->is_enabled) {
-    MMAL_BUFFER_HEADER_T* newBuffer =
-      mmal_queue_get(pCamera->getSplitterRawBufferPool()->queue);
-    if (newBuffer == nullptr) {
-      Logger::warning(__func__, "Failed to get new buffer\n");
-    } else if (mmal_port_send_buffer(port, newBuffer) != MMAL_SUCCESS) {
-      Logger::warning(__func__, "Failed to send new buffer to port\n");
-    }
-  }
-}
-
 void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   //Logger::debug(CAMERA_NS, "Camera::encoderCallback called\n");
   Camera* pCamera = reinterpret_cast<Camera*>(port->userdata);
@@ -547,7 +431,6 @@ enum {
   PREVIEW_PORT = 0,
   VIDEO_PORT = 1,
   STILL_PORT = 2,
-  SPLITTER_PORT = 0,
 };
 
 
@@ -562,9 +445,6 @@ MMAL_STATUS_T Camera::getInputFormat(PortType t, MMAL_ES_FORMAT_T*& es) {
       break;
     case PortType::STILL:
       port = getCamera()->input[STILL_PORT];
-      break;
-    case PortType::SPLITTER:
-      port = getSplitter()->input[SPLITTER_PORT];
       break;
     default:
       return MMAL_EINVAL;
@@ -585,9 +465,6 @@ MMAL_STATUS_T Camera::setInputFormat(PortType t, MMAL_ES_FORMAT_T& es) {
       break; case PortType::STILL:
       port = getCamera()->input[STILL_PORT];
       break;
-    case PortType::SPLITTER:
-      port = getSplitter()->input[SPLITTER_PORT];
-      break;
     default:
       return MMAL_EINVAL;
   }
@@ -606,9 +483,6 @@ MMAL_STATUS_T Camera::getOutputFormat(PortType t, MMAL_ES_FORMAT_T*& es) {
       break;
     case PortType::STILL:
       port = getCamera()->output[STILL_PORT];
-      break;
-    case PortType::SPLITTER:
-      port = getSplitter()->output[0];
       break;
     default:
       return MMAL_EINVAL;
@@ -629,9 +503,6 @@ MMAL_STATUS_T Camera::setOutputFormat(PortType t, MMAL_ES_FORMAT_T& es) {
       break;
     case PortType::STILL:
       port = getCamera()->output[STILL_PORT];
-      break;
-    case PortType::SPLITTER:
-      port = getSplitter()->output[0];
       break;
     default:
       return MMAL_EINVAL;
@@ -688,18 +559,6 @@ MMAL_PORT_T* Camera::getVideoOutputPort() const {
   return getCamera()->output[VIDEO_PORT];
 }
 
-MMAL_PORT_T* Camera::getSplitterInputPort() const {
-  return getSplitter()->input[0];
-}
-
-MMAL_PORT_T* Camera::getSplitterRawOutputPort() const {
-  return getSplitter()->output[0];
-}
-
-MMAL_PORT_T* Camera::getSplitterEncodedOutputPort() const {
-  return getSplitter()->output[1];
-}
-
 MMAL_PORT_T* Camera::getEncoderInputPort() const {
   return getEncoder()->input[0];
 }
@@ -725,21 +584,6 @@ MMAL_STATUS_T Camera::createBufferPools() {
                  videoOutput->buffer_num, videoOutput->buffer_size);
   }
 #endif
-
-  {
-    // raw output
-    MMAL_PORT_T* splitterOutput = getSplitterRawOutputPort();
-    splitterRawPool = mmal_port_pool_create(splitterOutput,
-                                            splitterOutput->buffer_num,
-                                            splitterOutput->buffer_size);
-    if (splitterRawPool == nullptr) {
-      Logger::error(__func__, "Failed to allocate splitter output[0] buffer pool\n");
-      return MMAL_ENOMEM;
-    }
-    Logger::info(__func__, "Created splitter output[0] buffer pool with %d "
-                 "buffers of size %d B\n",
-                 splitterOutput->buffer_num, splitterOutput->buffer_size);
-  }
 
 #if 0
   {
@@ -786,10 +630,6 @@ MMAL_POOL_T* Camera::getSplitterEncodedBufferPool() {
 }
 #endif
 
-MMAL_POOL_T* Camera::getSplitterRawBufferPool() {
-  return splitterRawPool;
-}
-
 MMAL_POOL_T* Camera::getEncoderBufferPool() {
   return encoderPool;
 }
@@ -799,16 +639,6 @@ MMAL_STATUS_T Camera::enableCamera() {
   status = mmal_component_enable(camera);
   if (status != MMAL_SUCCESS) {
     Logger::error(CAMERA_NS, "Failed to enable camera component\n");
-    return status;
-  }
-
-  return status;
-}
-
-MMAL_STATUS_T Camera::enableSplitter() {
-  MMAL_STATUS_T status = mmal_component_enable(splitter);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "Failed to enable splitter component\n");
     return status;
   }
 
@@ -827,16 +657,6 @@ MMAL_STATUS_T Camera::enableEncoder() {
 
 MMAL_STATUS_T Camera::enableCallbacks() {
   MMAL_STATUS_T status;
-
-  {
-    MMAL_PORT_T* splitterOutput = getSplitterRawOutputPort();
-    splitterOutput->userdata = reinterpret_cast<MMAL_PORT_USERDATA_T*>(this);
-    status = mmal_port_enable(splitterOutput, Camera::splitterRawCallback);
-    if (status != MMAL_SUCCESS) {
-      Logger::error(CAMERA_NS, "Failed to set up raw splitter output callback\n");
-      return status;
-    }
-  }
 
   {
     MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
@@ -884,39 +704,21 @@ MMAL_STATUS_T Camera::enableCallbacks() {
 MMAL_STATUS_T Camera::setUpConnections() {
   MMAL_PORT_T
     * videoOutput = getVideoOutputPort(),
-    * splitterInput = getSplitterInputPort(),
-    * splitterOutput = getSplitterEncodedOutputPort(),
     * encoderInput = getEncoderInputPort();
   MMAL_STATUS_T status;
-  // video -> splitter
-  status = mmal_connection_create(&videoSplitterConnection,
-                                  videoOutput, splitterInput,
+  // video -> encoder
+  status = mmal_connection_create(&videoEncoderConnection,
+                                  videoOutput, encoderInput,
                                   MMAL_CONNECTION_FLAG_TUNNELLING |
                                   MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
   if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to connect video output to splitter input[0]\n");
+    Logger::error(__func__, "Failed to connect video output to encoder input[0]\n");
     return status;
   }
 
-  status = mmal_connection_enable(videoSplitterConnection);
+  status = mmal_connection_enable(videoEncoderConnection);
   if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to enable video -> splitter connection\n");
-    return status;
-  }
-
-  // splitter -> encoder
-  status = mmal_connection_create(&splitterEncoderConnection,
-                                  splitterOutput, encoderInput,
-                                  MMAL_CONNECTION_FLAG_TUNNELLING |
-                                  MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to connect splitter output[1] to encoder input\n");
-    return status;
-  }
-
-  status = mmal_connection_enable(splitterEncoderConnection);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to enable splitter -> encoder connection\n");
+    Logger::error(__func__, "Failed to enable video -> encoder connection\n");
     return status;
   }
 

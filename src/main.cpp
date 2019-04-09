@@ -146,11 +146,6 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  if (camera.configureSplitter() != MMAL_SUCCESS) {
-    Logger::error("Failed to configure splitter\n");
-    return 1;
-  }
-
   // Set some parameters
   // TODO set more parameters
   //setColorEffect
@@ -178,10 +173,6 @@ int main(int argc, char* argv[]) {
 
   if (camera.enableCamera() != MMAL_SUCCESS) {
     Logger::error("Failed to enable camera\n");
-    return 1;
-  }
-  if (camera.enableSplitter() != MMAL_SUCCESS) {
-    Logger::error("Failed to enable splitter\n");
     return 1;
   }
   if (camera.enableEncoder() != MMAL_SUCCESS) {
@@ -214,17 +205,6 @@ int main(int argc, char* argv[]) {
       MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(camera.getEncoderBufferPool()->queue);
       if (mmal_port_send_buffer(encoderOutput, buf) != MMAL_SUCCESS) {
         Logger::warning("Failed to send buffer to encoder output port\n");
-      }
-    }
-  }
-
-  {
-    MMAL_PORT_T* splitterRawOutput = camera.getSplitterRawOutputPort();
-    int n = mmal_queue_length(camera.getSplitterRawBufferPool()->queue);
-    for (int q = 0; q < n; q++) {
-      MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(camera.getSplitterRawBufferPool()->queue);
-      if (mmal_port_send_buffer(splitterRawOutput, buf) != MMAL_SUCCESS) {
-        Logger::warning("Failed to send buffer to splitter output port\n");
       }
     }
   }
