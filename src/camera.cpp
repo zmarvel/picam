@@ -32,35 +32,54 @@ static const std::string CAMERA_NS = "Camera: ";
 
 
 Camera::Camera(int cameraNum)
-  : camera{nullptr}
+  : cameraNum{cameraNum}
+  , camera{nullptr}
   , splitter{nullptr}
   , encoder{nullptr}
   , preview{nullptr}
-  , cameraNum{cameraNum}
-  , pool{nullptr}
-  , splitterEncodedPool{nullptr}
   , splitterRawPool{nullptr}
   , encoderPool{nullptr}
+  , videoSplitterConnection{nullptr}
+  , splitterEncoderConnection{nullptr}
   , encodedOutput{}
   , encodedOutputOpen{false}
 {
 }
 
 Camera::~Camera() {
+  // Clean up connections
+  if ((splitterEncoderConnection != nullptr) && (mmal_connection_destroy(splitterEncoderConnection) != MMAL_SUCCESS)) {
+    Logger::warning(__func__, "failed to destroy splitter -> encoder connection\n");
+  }
+  if ((videoSplitterConnection != nullptr) && (mmal_connection_destroy(videoSplitterConnection) != MMAL_SUCCESS)) {
+    Logger::warning(__func__, "failed to destroy video -> splitter connection\n");
+  }
+
+
+  // Clean up pools
+  if (splitterRawPool != nullptr) {
+    mmal_pool_destroy(splitterRawPool);
+  }
+  if (encoderPool != nullptr) {
+    mmal_pool_destroy(encoderPool);
+  }
+
+
+  // Clean up components
   if ((camera != nullptr) && (mmal_component_destroy(camera) != MMAL_SUCCESS)) {
-    Logger::warning(CAMERA_NS, "failed to destroy camera component\n");
+    Logger::warning(__func__, "failed to destroy camera component\n");
   }
 
   if ((splitter != nullptr) && (mmal_component_destroy(splitter) != MMAL_SUCCESS)) {
-    Logger::warning(CAMERA_NS, "failed to destroy splitter component\n");
+    Logger::warning(__func__, "failed to destroy splitter component\n");
   }
 
   if ((encoder != nullptr) && (mmal_component_destroy(encoder) != MMAL_SUCCESS)) {
-    Logger::warning(CAMERA_NS, "failed to destroy encoder component\n");
+    Logger::warning(__func__, "failed to destroy encoder component\n");
   }
 
   if ((preview != nullptr) && (mmal_component_destroy(preview) != MMAL_SUCCESS)) {
-    Logger::warning(CAMERA_NS, "failed to destroy null preview component\n");
+    Logger::warning(__func__, "failed to destroy null preview component\n");
   }
 }
 
@@ -163,15 +182,15 @@ MMAL_STATUS_T Camera::configurePreview() {
 
 MMAL_STATUS_T Camera::configureSplitter() {
   // Configure splitter input format
-  mmal_format_copy(getSplitterInputPort(0)->format,
+  mmal_format_copy(getSplitterInputPort()->format,
                    getVideoOutputPort()->format);
 
-  MMAL_PORT_T* splitterInput = getSplitterInputPort(0);
+  MMAL_PORT_T* splitterInput = getSplitterInputPort();
   if (splitterInput->buffer_num < 3) {
     splitterInput->buffer_num = 3;
   }
 
-  MMAL_STATUS_T status = mmal_port_format_commit(getSplitterInputPort(0));
+  MMAL_STATUS_T status = mmal_port_format_commit(getSplitterInputPort());
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "Failed to set splitter input[0]\n");
     return status;
@@ -180,14 +199,14 @@ MMAL_STATUS_T Camera::configureSplitter() {
   // Splitter output formats
 
   // Output 0 will be used for raw output
-  mmal_format_copy(getSplitterOutputPort(0)->format,
+  mmal_format_copy(getSplitterRawOutputPort()->format,
                    splitterInput->format);
-  MMAL_ES_FORMAT_T* fmt = getSplitterOutputPort(0)->format;
+  MMAL_ES_FORMAT_T* fmt = getSplitterRawOutputPort()->format;
   fmt->encoding = MMAL_ENCODING_I420;
   fmt->encoding_variant = MMAL_ENCODING_I420;
   fmt->es->video.frame_rate.num = 0;
   fmt->es->video.frame_rate.den = 1;
-  status = mmal_port_format_commit(getSplitterOutputPort(0));
+  status = mmal_port_format_commit(getSplitterRawOutputPort());
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "Failed to set splitter output[0]\n");
     return status;
@@ -195,32 +214,34 @@ MMAL_STATUS_T Camera::configureSplitter() {
 
   // Output 1 will be sent to the H264 encoder, so it will be left the same
   // as the input stream
-  mmal_format_copy(getSplitterOutputPort(1)->format, splitterInput->format);
-  fmt = getSplitterOutputPort(1)->format;
+  mmal_format_copy(getSplitterEncodedOutputPort()->format, splitterInput->format);
+  fmt = getSplitterEncodedOutputPort()->format;
+  fmt->encoding = MMAL_ENCODING_OPAQUE;
+  fmt->encoding_variant = 0;
   fmt->es->video.frame_rate.num = 0;
   fmt->es->video.frame_rate.den = 1;
-  status = mmal_port_format_commit(getSplitterOutputPort(1));
+  status = mmal_port_format_commit(getSplitterEncodedOutputPort());
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "Failed to set splitter output[1]\n");
     return status;
   }
 
   // Output 2 will be left the same as the input stream
-  mmal_format_copy(getSplitterOutputPort(2)->format, splitterInput->format);
-  fmt = getSplitterOutputPort(2)->format;
+  mmal_format_copy(getSplitter()->output[2]->format, splitterInput->format);
+  fmt = getSplitter()->output[2]->format;
   fmt->es->video.frame_rate.num = 0;
   fmt->es->video.frame_rate.den = 1;
-  status = mmal_port_format_commit(getSplitterOutputPort(2));
+  status = mmal_port_format_commit(getSplitter()->output[2]);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "Failed to set splitter output[2]\n");
     return status;
   }
 
-  if (getSplitterOutputPort(0)->buffer_num < 3) {
-    getSplitterOutputPort(0)->buffer_num = 3;
+  if (getSplitterRawOutputPort()->buffer_num < 3) {
+    getSplitterRawOutputPort()->buffer_num = 3;
   }
-  if (getSplitterOutputPort(1)->buffer_num < 3) {
-    getSplitterOutputPort(1)->buffer_num = 3;
+  if (getSplitterEncodedOutputPort()->buffer_num < 3) {
+    getSplitterEncodedOutputPort()->buffer_num = 3;
   }
 
   return status;
@@ -379,6 +400,98 @@ MMAL_STATUS_T Camera::setSensorMode(SensorMode mode) {
                                         mode);
 }
 
+static void printBufferFlags(const char* indent, const char* sep,
+                             MMAL_BUFFER_HEADER_T* buffer) {
+  if (indent == nullptr) {
+    indent = "";
+  }
+  if (sep == nullptr) {
+    sep = "\n";
+  }
+
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_EOS) {
+    printf("%sEOS%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_START) {
+    printf("%sFRAME_START%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
+    printf("%sFRAME_END%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME) {
+    printf("%sFRAME%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME) {
+    printf("%sKEYFRAME%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_DISCONTINUITY) {
+    printf("%sDISCONTINUITY%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) {
+    printf("%sCONFIG%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_ENCRYPTED) {
+    printf("%sENCRYPTED%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO) {
+    printf("%sCODECSIDEINFO%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAGS_SNAPSHOT) {
+    printf("%sSNAPSHOT%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_CORRUPTED) {
+    printf("%sCORRUPTED%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED) {
+    printf("%sTRANSMISSION_FAILED%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_DECODEONLY) {
+    printf("%sDECODEONLY%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_NAL_END) {
+    printf("%sNAL_END%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_USER0) {
+    printf("%sUSER0%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_USER1) {
+    printf("%sUSER1%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_USER2) {
+    printf("%sUSER2%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_USER3) {
+    printf("%sUSER3%s", indent, sep);
+  }
+
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FORMAT_SPECIFIC_START_BIT) {
+    printf("%sSPECIFIC_START_BIT%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FORMAT_SPECIFIC_START) {
+    printf("%sSPECIFIC_START%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_INTERLACED) {
+    printf("%sINTERLACED%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_TOP_FIELD_FIRST) {
+    printf("%sTOP_FIELD_FIRST%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_DISPLAY_EXTERNAL) {
+    printf("%sDISPLAY_EXTERNAL%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_PROTECTED) {
+    printf("%sPROTECTED%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_COLUMN_LOG2_SHIFT) {
+    printf("%sCOLUMN_LOG2_SHIFT%s", indent, sep);
+  }
+  if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_COLUMN_LOG2_MASK) {
+    printf("%sCOLUMN_LOG2_MASK%s", indent, sep);
+  }
+
+
+}
+
 void Camera::controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   Logger::debug(CAMERA_NS, "Camera::controlCallback called with cmd=0x%x\n", buffer->cmd);
 }
@@ -409,8 +522,12 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
     pCamera->writeOutput(reinterpret_cast<char*>(buffer->data + buffer->offset),
                          buffer->length);
     mmal_buffer_header_mem_unlock(buffer);
-    Logger::debug(__func__, "Write %u B to output file\n", buffer->length);
+    Logger::debug(__func__, "Wrote %u B to output file\n", buffer->length);
+  } else {
+    Logger::debug(__func__, "Got called but output file is closed\n");
   }
+  printBufferFlags(nullptr, " ", buffer);
+  puts("");
 
   mmal_buffer_header_release(buffer);
 
@@ -469,7 +586,7 @@ MMAL_STATUS_T Camera::setInputFormat(PortType t, MMAL_ES_FORMAT_T& es) {
       port = getCamera()->input[STILL_PORT];
       break;
     case PortType::SPLITTER:
-      port = getSplitter()->input[0];
+      port = getSplitter()->input[SPLITTER_PORT];
       break;
     default:
       return MMAL_EINVAL;
@@ -571,12 +688,16 @@ MMAL_PORT_T* Camera::getVideoOutputPort() const {
   return getCamera()->output[VIDEO_PORT];
 }
 
-MMAL_PORT_T* Camera::getSplitterInputPort(int i) const {
-  return getSplitter()->input[i];
+MMAL_PORT_T* Camera::getSplitterInputPort() const {
+  return getSplitter()->input[0];
 }
 
-MMAL_PORT_T* Camera::getSplitterOutputPort(int i) const {
-  return getSplitter()->output[i];
+MMAL_PORT_T* Camera::getSplitterRawOutputPort() const {
+  return getSplitter()->output[0];
+}
+
+MMAL_PORT_T* Camera::getSplitterEncodedOutputPort() const {
+  return getSplitter()->output[1];
 }
 
 MMAL_PORT_T* Camera::getEncoderInputPort() const {
@@ -588,21 +709,26 @@ MMAL_PORT_T* Camera::getEncoderOutputPort() const {
 }
 
 MMAL_STATUS_T Camera::createBufferPools() {
-  MMAL_PORT_T* videoOutput = getVideoOutputPort();
-  pool = mmal_port_pool_create(videoOutput,
-                               videoOutput->buffer_num,
-                               videoOutput->buffer_size);
-  if (pool == nullptr) {
-    Logger::error(__func__, "Failed to allocate video port buffer pool\n");
-    return MMAL_ENOMEM;
+#if 0
+  {
+    // video output
+    MMAL_PORT_T* videoOutput = getVideoOutputPort();
+    pool = mmal_port_pool_create(videoOutput,
+                                 videoOutput->buffer_num,
+                                 videoOutput->buffer_size);
+    if (pool == nullptr) {
+      Logger::error(__func__, "Failed to allocate video port buffer pool\n");
+      return MMAL_ENOMEM;
+    }
+    Logger::info(__func__, "Created video output buffer pool with %d "
+                 "buffers of size %d B\n",
+                 videoOutput->buffer_num, videoOutput->buffer_size);
   }
-  Logger::info(__func__, "Created video output buffer pool with %d "
-               "buffers of size %d B\n",
-               videoOutput->buffer_num, videoOutput->buffer_size);
+#endif
 
   {
     // raw output
-    MMAL_PORT_T* splitterOutput = getSplitterOutputPort(0);
+    MMAL_PORT_T* splitterOutput = getSplitterRawOutputPort();
     splitterRawPool = mmal_port_pool_create(splitterOutput,
                                             splitterOutput->buffer_num,
                                             splitterOutput->buffer_size);
@@ -615,9 +741,10 @@ MMAL_STATUS_T Camera::createBufferPools() {
                  splitterOutput->buffer_num, splitterOutput->buffer_size);
   }
 
+#if 0
   {
     // output to encoder
-    MMAL_PORT_T* splitterOutput = getSplitterOutputPort(1);
+    MMAL_PORT_T* splitterOutput = getSplitterEncodedOutputPort();
     splitterEncodedPool = mmal_port_pool_create(splitterOutput,
                                                 splitterOutput->buffer_num,
                                                 splitterOutput->buffer_size);
@@ -629,29 +756,35 @@ MMAL_STATUS_T Camera::createBufferPools() {
                  "buffers of size %d B\n",
                  splitterOutput->buffer_num, splitterOutput->buffer_size);
   }
+#endif
 
-
-  MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
-  encoderPool = mmal_port_pool_create(encoderOutput, encoderOutput->buffer_num,
-                                      encoderOutput->buffer_size);
-  if (encoderPool == nullptr) {
-    Logger::error(__func__, "Failed to allocate encoder output buffer pool\n");
-    return MMAL_ENOMEM;
+  {
+    MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
+    encoderPool = mmal_port_pool_create(encoderOutput, encoderOutput->buffer_num,
+                                        encoderOutput->buffer_size);
+    if (encoderPool == nullptr) {
+      Logger::error(__func__, "Failed to allocate encoder output buffer pool\n");
+      return MMAL_ENOMEM;
+    }
+    Logger::info(__func__, "Created encoder output buffer pool with %d "
+                 "buffers of size %d B\n",
+                 encoderOutput->buffer_num, encoderOutput->buffer_size);
   }
-  Logger::info(__func__, "Created encoder output buffer pool with %d "
-               "buffers of size %d B\n",
-               encoderOutput->buffer_num, encoderOutput->buffer_size);
 
   return MMAL_SUCCESS;
 }
 
+#if 0
 MMAL_POOL_T* Camera::getVideoBufferPool() {
   return pool;
 }
+#endif
 
+#if 0
 MMAL_POOL_T* Camera::getSplitterEncodedBufferPool() {
   return splitterEncodedPool;
 }
+#endif
 
 MMAL_POOL_T* Camera::getSplitterRawBufferPool() {
   return splitterRawPool;
@@ -696,7 +829,7 @@ MMAL_STATUS_T Camera::enableCallbacks() {
   MMAL_STATUS_T status;
 
   {
-    MMAL_PORT_T* splitterOutput = getSplitterOutputPort(0);
+    MMAL_PORT_T* splitterOutput = getSplitterRawOutputPort();
     splitterOutput->userdata = reinterpret_cast<MMAL_PORT_USERDATA_T*>(this);
     status = mmal_port_enable(splitterOutput, Camera::splitterRawCallback);
     if (status != MMAL_SUCCESS) {
@@ -731,7 +864,7 @@ MMAL_STATUS_T Camera::enableCallbacks() {
   //  return status;
   //}
 
-  //status = mmal_port_enable(getSplitterOutputPort(0), nullptr);
+  //status = mmal_port_enable(getSplitterRawOutputPort(), nullptr);
   //if (status != MMAL_SUCCESS) {
   //  Logger::error(__func__, "Failed to enable splitter output[0] port\n");
   //  return status;
@@ -749,14 +882,10 @@ MMAL_STATUS_T Camera::enableCallbacks() {
 }
 
 MMAL_STATUS_T Camera::setUpConnections() {
-  MMAL_CONNECTION_T
-    * videoSplitterConnection,
-    * splitterEncoderConnection;
-
   MMAL_PORT_T
     * videoOutput = getVideoOutputPort(),
-    * splitterInput = getSplitterInputPort(0),
-    * splitterOutput = getSplitterOutputPort(1),
+    * splitterInput = getSplitterInputPort(),
+    * splitterOutput = getSplitterEncodedOutputPort(),
     * encoderInput = getEncoderInputPort();
   MMAL_STATUS_T status;
   // video -> splitter

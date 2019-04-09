@@ -54,6 +54,11 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  if (camera.openOutputFile(argv[1]) != MMAL_SUCCESS) {
+    Logger::error("Failed to open output file\n");
+    return 1;
+  }
+
   {
     // Set the camera config
     MMAL_PARAMETER_CAMERA_CONFIG_T cameraConfig = {
@@ -184,14 +189,16 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Now set up the buffers
-  if (camera.createBufferPools() != MMAL_SUCCESS) {
-    Logger::error("Failed to create video port buffer pool\n");
+  // Connect all the ports
+  if (camera.setUpConnections() != MMAL_SUCCESS) {
     return 1;
   }
 
-  // Connect all the ports
-  if (camera.setUpConnections() != MMAL_SUCCESS) {
+  // Now set up the buffers
+  // If we do this before creating connections, we get errors when we try to
+  // send splitter output buffers to the port
+  if (camera.createBufferPools() != MMAL_SUCCESS) {
+    Logger::error("Failed to create video port buffer pool\n");
     return 1;
   }
 
@@ -212,7 +219,7 @@ int main(int argc, char* argv[]) {
   }
 
   {
-    MMAL_PORT_T* splitterRawOutput = camera.getSplitterOutputPort(0);
+    MMAL_PORT_T* splitterRawOutput = camera.getSplitterRawOutputPort();
     int n = mmal_queue_length(camera.getSplitterRawBufferPool()->queue);
     for (int q = 0; q < n; q++) {
       MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(camera.getSplitterRawBufferPool()->queue);
@@ -222,12 +229,6 @@ int main(int argc, char* argv[]) {
     }
   }
 
-
-
-  if (camera.openOutputFile(argv[1]) != MMAL_SUCCESS) {
-    Logger::error("Failed to open output file\n");
-    return 1;
-  }
 
   //
   // Now that all the ports are set up, let's capture video

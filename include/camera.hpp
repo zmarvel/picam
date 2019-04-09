@@ -81,8 +81,9 @@ class Camera {
     }
 
     MMAL_PORT_T* getVideoOutputPort() const;
-    MMAL_PORT_T* getSplitterInputPort(int i) const;
-    MMAL_PORT_T* getSplitterOutputPort(int i) const;
+    MMAL_PORT_T* getSplitterInputPort() const;
+    MMAL_PORT_T* getSplitterRawOutputPort() const;
+    MMAL_PORT_T* getSplitterEncodedOutputPort() const;
     MMAL_PORT_T* getEncoderInputPort() const;
     MMAL_PORT_T* getEncoderOutputPort() const;
 
@@ -304,15 +305,21 @@ class Camera {
     
 
   private:
+    int cameraNum;
+
+    // Components
     MMAL_COMPONENT_T* camera;
     MMAL_COMPONENT_T* splitter;
     MMAL_COMPONENT_T* encoder;
     MMAL_COMPONENT_T* preview;
-    int cameraNum;
-    MMAL_POOL_T* pool;
-    MMAL_POOL_T* splitterEncodedPool;
+
+    // Buffer pools
     MMAL_POOL_T* splitterRawPool;
     MMAL_POOL_T* encoderPool;
+
+    // Connections
+    MMAL_CONNECTION_T* videoSplitterConnection;
+    MMAL_CONNECTION_T* splitterEncoderConnection;
 
     std::ofstream encodedOutput;
     bool encodedOutputOpen;
