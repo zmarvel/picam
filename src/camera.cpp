@@ -80,7 +80,7 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
   // Allocate the camera component
   status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &camera);
   if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "failed to allocate camera resources\n");
+    Logger::error(__func__, "failed to allocate camera resources\n");
     return status;
   }
 
@@ -89,12 +89,12 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
                                           MMAL_PARAMETER_CAMERA_NUM,
                                           cameraNum);
   if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "failed to set camera number\n");
+    Logger::error(__func__, "failed to set camera number\n");
     return status;
   }
 
-  if (camera->output_num < 1) {
-    Logger::error(CAMERA_NS, "invalid camera output number\n");
+  if (camera->output_num < 3) {
+    Logger::error(__func__, "invalid camera output number\n");
     return MMAL_ENOSYS;
   }
 
@@ -103,13 +103,13 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
                                           MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
                                           mode);
   if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "failed to set sensor mode\n");
+    Logger::error(__func__, "failed to set sensor mode\n");
     return status;
   }
 
   status = mmal_port_enable(getCamera()->control, Camera::controlCallback);
   if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "failed to enable control port\n");
+    Logger::error(__func__, "failed to enable control port\n");
     return status;
   }
 
@@ -119,12 +119,12 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
 
   status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_ENCODER, &encoder);
   if (status != MMAL_SUCCESS) {
-    Logger::error(CAMERA_NS, "failed to allocate encoder resources\n");
+    Logger::error(__func__, "failed to allocate encoder resources\n");
     return status;
   }
 
   if ((encoder->input_num < 1) || (encoder->output_num < 1)) {
-    Logger::error(CAMERA_NS, "invalid encoder input/output number\n");
+    Logger::error(__func__, "invalid encoder input/output number\n");
     return MMAL_ENOSYS;
   }
 
@@ -204,6 +204,7 @@ MMAL_STATUS_T Camera::configureEncoder(H264EncoderConfig& cfg) {
     return MMAL_EINVAL;
   }
 
+  // TODO: does the hardware even support all these levels?
   MMAL_VIDEO_LEVEL_T level = MMAL_VIDEO_LEVEL_DUMMY;
   switch (cfg.level) {
     case H264EncoderConfig::Level::H264_2:
@@ -401,12 +402,14 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   //Logger::debug(CAMERA_NS, "Camera::encoderCallback called\n");
   Camera* pCamera = reinterpret_cast<Camera*>(port->userdata);
 
+  size_t nBytes = 0;
   if (pCamera->isOutputFileOpen()) {
     mmal_buffer_header_mem_lock(buffer);
+    nBytes = buffer->length;
     pCamera->writeOutput(reinterpret_cast<char*>(buffer->data + buffer->offset),
-                         buffer->length);
+                         nBytes);
     mmal_buffer_header_mem_unlock(buffer);
-    Logger::debug(__func__, "Wrote %u B to output file\n", buffer->length);
+    Logger::debug(__func__, "Wrote %u B to output file\n", nBytes);
   } else {
     Logger::debug(__func__, "Got called but output file is closed\n");
   }

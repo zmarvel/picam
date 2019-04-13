@@ -98,7 +98,7 @@ int main(int argc, char* argv[]) {
       camera.getVideoOutputPort()->buffer_num = 3;
     }
 
-    if (camera.setVideoFormat(MMAL_ENCODING_OPAQUE, 0,
+    if (camera.setVideoFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420,
                               formatInVideo)
         != MMAL_SUCCESS) {
       Logger::error("Failed to set video format\n");
@@ -118,7 +118,7 @@ int main(int argc, char* argv[]) {
       .frame_rate = { 30, 1 },
     };
 
-    if (camera.setPreviewFormat(MMAL_ENCODING_OPAQUE, 0, formatIn)
+    if (camera.setPreviewFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420, formatIn)
         != MMAL_SUCCESS) {
       Logger::error("Failed to set preview format\n");
       return 1;
@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
       .frame_rate = { 0, 1 },
     };
 
-    if (camera.setStillFormat(MMAL_ENCODING_OPAQUE, 0, formatIn)
+    if (camera.setStillFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420, formatIn)
         != MMAL_SUCCESS) {
       Logger::error("Failed to set still format\n");
       return 1;
@@ -180,11 +180,6 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Connect all the ports
-  if (camera.setUpConnections() != MMAL_SUCCESS) {
-    return 1;
-  }
-
   // Now set up the buffers
   // If we do this before creating connections, we get errors when we try to
   // send splitter output buffers to the port
@@ -192,6 +187,12 @@ int main(int argc, char* argv[]) {
     Logger::error("Failed to create video port buffer pool\n");
     return 1;
   }
+
+  // Connect all the ports
+  if (camera.setUpConnections() != MMAL_SUCCESS) {
+    return 1;
+  }
+
 
   if (camera.enableCallbacks() != MMAL_SUCCESS) {
     Logger::error("Failed to enable camera callbacks\n");
