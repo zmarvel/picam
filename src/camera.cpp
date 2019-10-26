@@ -44,6 +44,17 @@ Camera::Camera(int cameraNum)
 }
 
 Camera::~Camera() {
+  // Disable ports so callbacks won't try to use resources that will be freed later
+  if ((camera != nullptr) && (mmal_port_disable(getEncoderOutputPort()) != MMAL_SUCCESS)) {
+    Logger::warning(__func__, "failed to disable encoder output\n");
+  }
+
+  if ((camera != nullptr) && (mmal_port_disable(getCamera()->control) != MMAL_SUCCESS)) {
+    Logger::warning(__func__, "failed to disable encoder output\n");
+  }
+
+  closeOutputFile();
+
   // Clean up connections
   if ((videoEncoderConnection != nullptr) && (mmal_connection_destroy(videoEncoderConnection) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to destroy video -> encoder connection\n");
@@ -293,7 +304,13 @@ MMAL_STATUS_T Camera::configureEncoder(H264EncoderConfig& cfg) {
     return status;
   }
 
-  return MMAL_SUCCESS;
+  status = mmal_port_format_commit(encoderOutput);
+  if (status != MMAL_SUCCESS) {
+    Logger::error(__func__, "Failed to commit encoder output port config\n");
+    return status;
+  }
+
+  return enableEncoder();
 }
 
 MMAL_STATUS_T Camera::setSensorMode(SensorMode mode) {
@@ -390,8 +407,6 @@ static void printBufferFlags(const char* indent, const char* sep,
   if (buffer->flags & MMAL_BUFFER_HEADER_VIDEO_FLAG_COLUMN_LOG2_MASK) {
     printf("%sCOLUMN_LOG2_MASK%s", indent, sep);
   }
-
-
 }
 
 void Camera::controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
@@ -409,12 +424,13 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
     pCamera->writeOutput(reinterpret_cast<char*>(buffer->data + buffer->offset),
                          nBytes);
     mmal_buffer_header_mem_unlock(buffer);
-    Logger::debug(__func__, "Wrote %u B to output file\n", nBytes);
+    printf("%u\n", nBytes);
+    //Logger::debug(__func__, "Wrote %u B to output file\n", nBytes);
   } else {
     Logger::debug(__func__, "Got called but output file is closed\n");
   }
-  printBufferFlags(nullptr, " ", buffer);
-  puts("");
+  //printBufferFlags(nullptr, " ", buffer);
+  //puts("");
 
   mmal_buffer_header_release(buffer);
 
@@ -427,7 +443,6 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
       Logger::warning(__func__, "Failed to send new buffer to port\n");
     }
   }
-
 }
 
 enum {
@@ -435,84 +450,6 @@ enum {
   VIDEO_PORT = 1,
   STILL_PORT = 2,
 };
-
-
-MMAL_STATUS_T Camera::getInputFormat(PortType t, MMAL_ES_FORMAT_T*& es) {
-  MMAL_PORT_T* port = nullptr;
-  switch (t) {
-    case PortType::VIDEO:
-      port = getCamera()->input[VIDEO_PORT];
-      break;
-    case PortType::PREVIEW:
-      port = getCamera()->input[PREVIEW_PORT];
-      break;
-    case PortType::STILL:
-      port = getCamera()->input[STILL_PORT];
-      break;
-    default:
-      return MMAL_EINVAL;
-  }
-  es = port->format;
-  //mmal_format_copy(&es, port->format);
-  return MMAL_SUCCESS;
-}
-
-MMAL_STATUS_T Camera::setInputFormat(PortType t, MMAL_ES_FORMAT_T& es) {
-  MMAL_PORT_T* port = nullptr;
-  switch (t) {
-    case PortType::VIDEO:
-      port = getCamera()->input[VIDEO_PORT];
-      break;
-    case PortType::PREVIEW:
-      port = getCamera()->input[PREVIEW_PORT];
-      break; case PortType::STILL:
-      port = getCamera()->input[STILL_PORT];
-      break;
-    default:
-      return MMAL_EINVAL;
-  }
-  mmal_format_copy(port->format, &es);
-  return mmal_port_format_commit(port);
-}
-
-MMAL_STATUS_T Camera::getOutputFormat(PortType t, MMAL_ES_FORMAT_T*& es) {
-  MMAL_PORT_T* port = nullptr;
-  switch (t) {
-    case PortType::VIDEO:
-      port = getCamera()->output[VIDEO_PORT];
-      break;
-    case PortType::PREVIEW:
-      port = getCamera()->output[PREVIEW_PORT];
-      break;
-    case PortType::STILL:
-      port = getCamera()->output[STILL_PORT];
-      break;
-    default:
-      return MMAL_EINVAL;
-  }
-  es = port->format;
-  //mmal_format_copy(&es, port->format);
-  return MMAL_SUCCESS;
-}
-
-MMAL_STATUS_T Camera::setOutputFormat(PortType t, MMAL_ES_FORMAT_T& es) {
-  MMAL_PORT_T* port = nullptr;
-  switch (t) {
-    case PortType::VIDEO:
-      port = getCamera()->output[VIDEO_PORT];
-      break;
-    case PortType::PREVIEW:
-      port = getCamera()->output[PREVIEW_PORT];
-      break;
-    case PortType::STILL:
-      port = getCamera()->output[STILL_PORT];
-      break;
-    default:
-      return MMAL_EINVAL;
-  }
-  mmal_format_copy(port->format, &es);
-  return mmal_port_format_commit(port);
-}
 
 MMAL_STATUS_T Camera::setVideoFormat(MMAL_FOURCC_T encoding,
                                      MMAL_FOURCC_T encodingVariant,
@@ -537,9 +474,9 @@ MMAL_STATUS_T Camera::setPreviewFormat(MMAL_FOURCC_T encoding,
   format->type = MMAL_ES_TYPE_VIDEO;
   format->encoding = encoding;
   format->encoding_variant = encodingVariant;
-  memcpy(&format->es->video, &videoFormat, sizeof(MMAL_ES_FORMAT_T));
+  memcpy(&format->es->video, &videoFormat, sizeof(MMAL_VIDEO_FORMAT_T));
 
-  format->flags = MMAL_ES_FORMAT_FLAG_FRAMED;
+  //format->flags = MMAL_ES_FORMAT_FLAG_FRAMED;
 
   return mmal_port_format_commit(port);
 }
@@ -551,9 +488,9 @@ MMAL_STATUS_T Camera::setStillFormat(MMAL_FOURCC_T encoding,
   MMAL_ES_FORMAT_T* format = port->format;
   format->encoding = encoding;
   format->encoding_variant = encodingVariant;
-  memcpy(&format->es->video, &videoFormat, sizeof(MMAL_ES_FORMAT_T));
+  memcpy(&format->es->video, &videoFormat, sizeof(MMAL_VIDEO_FORMAT_T));
 
-  format->flags = MMAL_ES_FORMAT_FLAG_FRAMED;
+  //format->flags = MMAL_ES_FORMAT_FLAG_FRAMED;
 
   return mmal_port_format_commit(port);
 }
@@ -571,40 +508,6 @@ MMAL_PORT_T* Camera::getEncoderOutputPort() const {
 }
 
 MMAL_STATUS_T Camera::createBufferPools() {
-#if 0
-  {
-    // video output
-    MMAL_PORT_T* videoOutput = getVideoOutputPort();
-    pool = mmal_port_pool_create(videoOutput,
-                                 videoOutput->buffer_num,
-                                 videoOutput->buffer_size);
-    if (pool == nullptr) {
-      Logger::error(__func__, "Failed to allocate video port buffer pool\n");
-      return MMAL_ENOMEM;
-    }
-    Logger::info(__func__, "Created video output buffer pool with %d "
-                 "buffers of size %d B\n",
-                 videoOutput->buffer_num, videoOutput->buffer_size);
-  }
-#endif
-
-#if 0
-  {
-    // output to encoder
-    MMAL_PORT_T* splitterOutput = getSplitterEncodedOutputPort();
-    splitterEncodedPool = mmal_port_pool_create(splitterOutput,
-                                                splitterOutput->buffer_num,
-                                                splitterOutput->buffer_size);
-    if (splitterRawPool == nullptr) {
-      Logger::error(__func__, "Failed to allocate splitter output[1] buffer pool\n");
-      return MMAL_ENOMEM;
-    }
-    Logger::info(__func__, "Created splitter output[1] buffer pool with %d "
-                 "buffers of size %d B\n",
-                 splitterOutput->buffer_num, splitterOutput->buffer_size);
-  }
-#endif
-
   {
     MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
     encoderPool = mmal_port_pool_create(encoderOutput, encoderOutput->buffer_num,
@@ -620,18 +523,6 @@ MMAL_STATUS_T Camera::createBufferPools() {
 
   return MMAL_SUCCESS;
 }
-
-#if 0
-MMAL_POOL_T* Camera::getVideoBufferPool() {
-  return pool;
-}
-#endif
-
-#if 0
-MMAL_POOL_T* Camera::getSplitterEncodedBufferPool() {
-  return splitterEncodedPool;
-}
-#endif
 
 MMAL_POOL_T* Camera::getEncoderBufferPool() {
   return encoderPool;
@@ -671,61 +562,56 @@ MMAL_STATUS_T Camera::enableCallbacks() {
     }
   }
 
-  // Although this doesn't strictly set up any callbacks, go ahead and enable 
-  // any ports that are connected to other ports here. These aren't allowed to
-  // have callbacks (see mmal_port_enable), but it keeps things consistent.
-
-  //status = mmal_port_enable(getVideoOutputPort(), nullptr);
-  //if (status != MMAL_SUCCESS) {
-  //  Logger::error(__func__, "Failed to enable video output port\n");
-  //  return status;
-  //}
-
-  //status = mmal_port_enable(getSplitterInputPort(0), nullptr);
-  //if (status != MMAL_SUCCESS) {
-  //  Logger::error(__func__, "Failed to enable splitter input port\n");
-  //  return status;
-  //}
-
-  //status = mmal_port_enable(getSplitterRawOutputPort(), nullptr);
-  //if (status != MMAL_SUCCESS) {
-  //  Logger::error(__func__, "Failed to enable splitter output[0] port\n");
-  //  return status;
-  //}
-
-  //status = mmal_port_enable(getEncoderInputPort(), nullptr);
-  //if (status != MMAL_SUCCESS) {
-  //  Logger::error(__func__, "Failed to enable encoder input port\n");
-  //  return status;
-  //}
-
-  // Apparently we don't have to enable these.
-
   return status;
 }
 
 MMAL_STATUS_T Camera::setUpConnections() {
-  MMAL_PORT_T
-    * videoOutput = getVideoOutputPort(),
-    * encoderInput = getEncoderInputPort();
-  MMAL_STATUS_T status;
-  // video -> encoder
-  status = mmal_connection_create(&videoEncoderConnection,
-                                  videoOutput, encoderInput,
-                                  MMAL_CONNECTION_FLAG_TUNNELLING |
-                                  MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to connect video output to encoder input[0]\n");
-    return status;
+  {
+    MMAL_PORT_T
+      * videoOutput = getVideoOutputPort(),
+      * encoderInput = getEncoderInputPort();
+    MMAL_STATUS_T status;
+    // video -> encoder
+    status = mmal_connection_create(&videoEncoderConnection,
+                                    videoOutput, encoderInput,
+                                    MMAL_CONNECTION_FLAG_TUNNELLING |
+                                    MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
+    if (status != MMAL_SUCCESS) {
+      Logger::error(__func__, "Failed to connect video output to encoder input[0]\n");
+      return status;
+    }
+
+    status = mmal_connection_enable(videoEncoderConnection);
+    if (status != MMAL_SUCCESS) {
+      Logger::error(__func__, "Failed to enable video -> encoder connection\n");
+      return status;
+    }
   }
 
-  status = mmal_connection_enable(videoEncoderConnection);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to enable video -> encoder connection\n");
-    return status;
+  {
+    // NOTE re: encoder broken
+    // this doesn't change anything??
+    MMAL_PORT_T
+      * previewOutput = getCamera()->output[PREVIEW_PORT],
+      * nullInput = preview->input[0];
+    MMAL_STATUS_T status;
+    status = mmal_connection_create(&previewNullConnection,
+                                    previewOutput, nullInput,
+                                    MMAL_CONNECTION_FLAG_TUNNELLING |
+                                    MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
+    if (status != MMAL_SUCCESS) {
+      Logger::error(__func__, "Failed to connect preview output[0] to null input\n");
+      return status;
+    }
+
+    status = mmal_connection_enable(previewNullConnection);
+    if (status != MMAL_SUCCESS) {
+      Logger::error(__func__, "Failed to enable preview -> null connection\n");
+      return status;
+    }
   }
 
-  return status;
+  return MMAL_SUCCESS;
 }
 
 MMAL_STATUS_T Camera::openOutputFile(std::string filename) {
@@ -800,16 +686,6 @@ MMAL_STATUS_T Camera::getColorEffect(bool& enable, uint32_t& u, uint32_t& v) {
   };
   MMAL_STATUS_T status = mmal_port_parameter_get(camera->control, &param.hdr); enable = param.enable; u = param.u; v = param.v; return status; }
 
-#if 0
-void Camera::setFocus(MMAL_PARAM_FOCUS_T focus);
-void Camera::getFocus(MMAL_PARAM_FOCUS_T& focus);
-
-void Camera::setExposureComp(int32_t comp);
-void Camera::setExposureComp(int32_t num, int32_t den);
-int32_t Camera::getExposureComp();
-void Camera::getExposureComp(int32_t& num, int32_t& den);
-#endif
-
 MMAL_STATUS_T Camera::enableCapture() {
   return mmal_port_parameter_set_boolean(getVideoOutputPort(),
                                          MMAL_PARAMETER_CAPTURE, MMAL_TRUE);
@@ -837,29 +713,10 @@ MMAL_STATUS_T Camera::getExposureMode(MMAL_PARAM_EXPOSUREMODE_T& mode) {
   return status;
 }
 
-#if 0
-MMAL_STATUS_T Camera::setExpMeteringMode(MMAL_PARAM_EXPOSUREMETERINGMODE_T mode);
-MMAL_STATUS_T Camera::getExpMeteringMode(MMAL_PARAM_EXPOSUREMETERINGMODE_T& mode);
-
-MMAL_PARAM_FOCUS_STATUS_T Camera::getFocusStatus();
-#endif
-
 MMAL_STATUS_T Camera::setCameraConfig(const MMAL_PARAMETER_CAMERA_CONFIG_T& config) {
   return mmal_port_parameter_set(camera->control, &config.hdr);
 }
 
-#if 0
-MMAL_PARAM_CAPTURE_STATUS_T Camera::getCaptureStatus();
-
-void Camera::setFrameRate(int32_t num, int32_t den);
-void Camera::getFrameRate(int32_t& num, int32_t& den);
-
-void Camera::setUseSTC(MMAL_CAMERA_STC_MODE_T mode);
-MMAL_CAMERA_STC_MODE_T Camera::getUseSTC();
-
-void Camera::getSensorInformation(MMAL_PARAMETER_SENSOR_INFORMATION_T& info);
-
-#endif
 MMAL_STATUS_T Camera::setSharpness(int32_t num, int32_t den) {
   return mmal_port_parameter_set_rational(camera->control,
                                           MMAL_PARAMETER_SHARPNESS,
@@ -899,20 +756,3 @@ MMAL_STATUS_T Camera::setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T useCase) {
   };
   return mmal_port_parameter_set(camera->control, &param.hdr);
 }
-
-#if 0
-MMAL_STATUS_T Camera::getCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T& useCase) {
-}
-
-void Camera::setShutterSpeed(uint32_t speed);
-uint32_t Camera::getShutterSpeed();
-
-void Camera::setPrivacyIndicator(MMAL_PARAM_PRIVACY_INDICATOR_T mode);
-MMAL_PARAM_PRIVACY_INDICATOR_T Camera::getPrivacyIndicator();
-
-void Camera::setAnalogGain(int32_t num, int32_t den);
-void Camera::getAnalogGain(int32_t& num, int32_t& den);
-
-void Camera::setDigitalGain(int32_t num, int32_t den);
-void Camera::getDigitalGain(int32_t& num, int32_t& den);
-#endif

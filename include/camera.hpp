@@ -304,6 +304,7 @@ class Camera {
 
     // Connections
     MMAL_CONNECTION_T* videoEncoderConnection;
+    MMAL_CONNECTION_T* previewNullConnection;
 
     std::ofstream encodedOutput;
     bool encodedOutputOpen;

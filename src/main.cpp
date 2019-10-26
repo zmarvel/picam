@@ -85,31 +85,6 @@ int main(int argc, char* argv[]) {
   }
 
   {
-    // Configure the video encoding
-    const MMAL_VIDEO_FORMAT_T formatInVideo = {
-      .width = align_up(width, 32),
-      .height = align_up(height, 16),
-      .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { 30, 1 },
-    };
-
-    // Make sure we have enough buffers
-    if (camera.getVideoOutputPort()->buffer_num < 3) {
-      camera.getVideoOutputPort()->buffer_num = 3;
-    }
-
-    if (camera.setVideoFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420,
-                              formatInVideo)
-        != MMAL_SUCCESS) {
-      Logger::error("Failed to set video format\n");
-      return 1;
-    }
-
-    Logger::debug("Video format: width=%u, height=%u\n",
-                  formatInVideo.width, formatInVideo.height);
-  }
-
-  {
     // Configure preview encoding
     const MMAL_VIDEO_FORMAT_T formatIn = {
       .width = align_up(width, 32),
@@ -141,6 +116,32 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  {
+    // Configure the video encoding
+    const MMAL_VIDEO_FORMAT_T formatInVideo = {
+      .width = align_up(width, 32),
+      .height = align_up(height, 16),
+      .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
+      .frame_rate = { 30, 1 },
+    };
+
+    // Make sure we have enough buffers
+    if (camera.getVideoOutputPort()->buffer_num < 3) {
+      camera.getVideoOutputPort()->buffer_num = 3;
+    }
+
+    if (camera.setVideoFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420,
+                              formatInVideo)
+        != MMAL_SUCCESS) {
+      Logger::error("Failed to set video format\n");
+      return 1;
+    }
+
+    Logger::debug("Video format: width=%u, height=%u\n",
+                  formatInVideo.width, formatInVideo.height);
+  }
+
+
 
   if (camera.configurePreview() != MMAL_SUCCESS) {
     return 1;
@@ -154,7 +155,7 @@ int main(int argc, char* argv[]) {
       || (camera.setExposureMode(MMAL_PARAM_EXPOSUREMODE_NIGHT) != MMAL_SUCCESS)
       || (camera.setSharpness(0, 1) != MMAL_SUCCESS)
       || (camera.setContrast(0, 1) != MMAL_SUCCESS)
-      || (camera.setBrightness(0, 1) != MMAL_SUCCESS)
+      || (camera.setBrightness(50, 100) != MMAL_SUCCESS)
       || (camera.setSaturation(0, 1) != MMAL_SUCCESS)
       || (camera.setISO(0) != MMAL_SUCCESS)
       || (camera.setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_VIDEO_CAPTURE) != MMAL_SUCCESS)) {
@@ -173,10 +174,6 @@ int main(int argc, char* argv[]) {
 
   if (camera.enableCamera() != MMAL_SUCCESS) {
     Logger::error("Failed to enable camera\n");
-    return 1;
-  }
-  if (camera.enableEncoder() != MMAL_SUCCESS) {
-    Logger::error("Failed to enable encoder\n");
     return 1;
   }
 
@@ -229,8 +226,6 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  camera.closeOutputFile();
-  
 
   Logger::debug("Done\n");
   return 0;
