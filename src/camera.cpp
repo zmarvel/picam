@@ -170,6 +170,7 @@ MMAL_STATUS_T Camera::configureEncoder(H264EncoderConfig& cfg) {
   encoderOutput->format->encoding = MMAL_ENCODING_H264;
 
   encoderOutput->format->bitrate = cfg.bitrate;
+  Logger::debug("Encoding using bitrage %u\n", cfg.bitrate);
 
   encoderOutput->buffer_size = encoderOutput->buffer_size_recommended;
   if (encoderOutput->buffer_size < encoderOutput->buffer_size_min) {
@@ -181,7 +182,16 @@ MMAL_STATUS_T Camera::configureEncoder(H264EncoderConfig& cfg) {
     encoderOutput->buffer_num = encoderOutput->buffer_num_min;
   }
 
-
+  Logger::debug("Encoder output configured for %u buffers of size %u.\n",
+                encoderOutput->buffer_num,
+                encoderOutput->buffer_size);
+  Logger::debug("Recommends %u buffers of size %u with respective mins %u and %u.\n",
+                encoderOutput->buffer_num_recommended,
+                encoderOutput->buffer_size_recommended,
+                encoderOutput->buffer_num_min,
+                encoderOutput->buffer_size_min
+                );
+                
 
   // According to RaspiVid.c, we should set the framerate to 0 to make sure
   // connecting it to the input port causes it to get set accordingly
@@ -456,7 +466,7 @@ MMAL_STATUS_T Camera::setVideoFormat(MMAL_FOURCC_T encoding,
                                      const MMAL_VIDEO_FORMAT_T& videoFormat) {
   MMAL_PORT_T* videoPort = getVideoOutputPort();
   MMAL_ES_FORMAT_T* format = videoPort->format;
-  format->type = MMAL_ES_TYPE_VIDEO;
+  //format->type = MMAL_ES_TYPE_VIDEO;
   format->encoding = encoding;
   format->encoding_variant = encodingVariant;
   memcpy(&format->es->video, &videoFormat, sizeof(MMAL_VIDEO_FORMAT_T));
@@ -471,7 +481,7 @@ MMAL_STATUS_T Camera::setPreviewFormat(MMAL_FOURCC_T encoding,
                                        const MMAL_VIDEO_FORMAT_T& videoFormat) {
   MMAL_PORT_T* port = getCamera()->output[PREVIEW_PORT];
   MMAL_ES_FORMAT_T* format = port->format;
-  format->type = MMAL_ES_TYPE_VIDEO;
+  //format->type = MMAL_ES_TYPE_VIDEO;
   format->encoding = encoding;
   format->encoding_variant = encodingVariant;
   memcpy(&format->es->video, &videoFormat, sizeof(MMAL_VIDEO_FORMAT_T));

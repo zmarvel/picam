@@ -82,6 +82,8 @@ int main(int argc, char* argv[]) {
       Logger::error("Failed to set cameraConfig\n");
       return 1;
     }
+    Logger::info("Camera configured. width=%u, height=%u\n",
+                 width, height);
   }
 
   {
@@ -98,6 +100,10 @@ int main(int argc, char* argv[]) {
       Logger::error("Failed to set preview format\n");
       return 1;
     }
+
+    Logger::info("Preview configured. width=%u, height=%u @ %u fps\n",
+                 width, height,
+                 formatIn.frame_rate.num / formatIn.frame_rate.den);
   }
 
   {
@@ -115,6 +121,8 @@ int main(int argc, char* argv[]) {
       return 1;
     }
   }
+
+  Logger::info("Still output configured. width=%u, height=%u\n", width, height);
 
   {
     // Configure the video encoding
@@ -137,7 +145,7 @@ int main(int argc, char* argv[]) {
       return 1;
     }
 
-    Logger::debug("Video format: width=%u, height=%u\n",
+    Logger::info("Video format set. width=%u, height=%u\n",
                   formatInVideo.width, formatInVideo.height);
   }
 
@@ -151,8 +159,11 @@ int main(int argc, char* argv[]) {
   // TODO set more parameters
   //setColorEffect
   //setFocus
-  if ((camera.setAWBMode(MMAL_PARAM_AWBMODE_OFF) != MMAL_SUCCESS)
+  if (
+      //(camera.setAWBMode(MMAL_PARAM_AWBMODE_OFF) != MMAL_SUCCESS)
+      (camera.setAWBMode(MMAL_PARAM_AWBMODE_AUTO) != MMAL_SUCCESS)
       || (camera.setExposureMode(MMAL_PARAM_EXPOSUREMODE_NIGHT) != MMAL_SUCCESS)
+      //|| (camera.setExposureMode(MMAL_PARAM_EXPOSUREMODE_AUTO) != MMAL_SUCCESS)
       || (camera.setSharpness(0, 1) != MMAL_SUCCESS)
       || (camera.setContrast(0, 1) != MMAL_SUCCESS)
       || (camera.setBrightness(50, 100) != MMAL_SUCCESS)
@@ -189,6 +200,34 @@ int main(int argc, char* argv[]) {
   if (camera.setUpConnections() != MMAL_SUCCESS) {
     return 1;
   }
+
+  {
+    auto* encoderInput = camera.getEncoderInputPort();
+    auto* encoderOutput = camera.getEncoderOutputPort();
+    float frameRateIn = encoderInput->format->es->video.frame_rate.num /
+                  encoderInput->format->es->video.frame_rate.den;
+    float frameRateOut = encoderOutput->format->es->video.frame_rate.num /
+                  encoderOutput->format->es->video.frame_rate.den;
+    Logger::debug("Encoder input format: %ux%u @ %f fps, crop=%u %u %u %u\n",
+                  encoderInput->format->es->video.width,
+                  encoderInput->format->es->video.height,
+                  frameRateIn,
+                  encoderInput->format->es->video.crop.x,
+                  encoderInput->format->es->video.crop.y,
+                  encoderInput->format->es->video.crop.width,
+                  encoderInput->format->es->video.crop.height
+                  );
+    Logger::debug("Encoder output format: %ux%u @ %f fps, crop=%u %u %u %u\n",
+                  encoderOutput->format->es->video.width,
+                  encoderOutput->format->es->video.height,
+                  frameRateOut,
+                  encoderInput->format->es->video.crop.x,
+                  encoderInput->format->es->video.crop.y,
+                  encoderInput->format->es->video.crop.width,
+                  encoderInput->format->es->video.crop.height
+                  );
+  }
+
 
 
   if (camera.enableCallbacks() != MMAL_SUCCESS) {
