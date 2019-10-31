@@ -72,7 +72,8 @@ int main(int argc, char* argv[]) {
   unsigned int width = SENSOR_MODE_WIDTH[SENSOR_MODE];
   unsigned int height = SENSOR_MODE_HEIGHT[SENSOR_MODE];
 
-  const unsigned int fps = 10;
+  //const std::pair<int, int> fps = {1, 10};
+  const std::pair<int, int> fps = {1, 1};
 
   Logger::setLogLevel(LogLevel::DEBUG);
 
@@ -120,7 +121,7 @@ int main(int argc, char* argv[]) {
       .width = align_up(width, 32),
       .height = align_up(height, 16),
       .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { fps, 1 },
+      .frame_rate = { fps.first, fps.second },
     };
 
     if (camera.setPreviewFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420, formatIn)
@@ -158,7 +159,7 @@ int main(int argc, char* argv[]) {
       .width = align_up(width, 32),
       .height = align_up(height, 16),
       .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { fps, 1 },
+      .frame_rate = { fps.first, fps.second },
     };
 
     // Make sure we have enough buffers
@@ -205,7 +206,7 @@ int main(int argc, char* argv[]) {
   // Set up the encoder
   {
     H264EncoderConfig encoderConfig = H264EncoderConfig::defaultConfig();
-    encoderConfig.framerate = { fps, 1 };
+    encoderConfig.framerate = { fps.first, fps.second };
     if (camera.configureEncoder(encoderConfig) != MMAL_SUCCESS) {
       Logger::error("Failed to configure encoder\n");
       return 1;
