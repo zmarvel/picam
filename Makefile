@@ -9,11 +9,13 @@ SRCS := src/main.cpp \
 OBJS := $(SRCS:%.cpp=%.o)
 DEPS := $(SRCS:%.cpp=%.d)
 
-INCDIRS := -Iinclude \
-    -Ilib/cpp-logging \
+INCLUDES := \
+  include \
+  lib/cpp-logging \
 
+INCDIRS := $(addprefix -I,$(INCLUDES))
 CFLAGS += -Wall -MD -std=gnu99 -g $(INCDIRS)
-CXXFLAGS += -Wall -MD -std=gnu++11 -g $(INCDIRS)
+CXXFLAGS += -Wall -MD -std=gnu++17 -g $(INCDIRS)
 LDFLAGS += -Wall -g
 
 ifdef WERROR
@@ -44,6 +46,7 @@ clean:
 .PHONY: ctags
 ctags: $(SRCS)
 	ctags $(SRCS)
+	ctags --append -R $(INCLUDES)
 	ctags --append -R lib
 	ctags --append -R /opt/vc/include/interface/mmal
 

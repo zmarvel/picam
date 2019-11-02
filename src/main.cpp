@@ -41,6 +41,9 @@ static inline uint32_t align_up(uint32_t n, uint32_t alignment) {
   return ((n + alignment - 1) / alignment) * alignment;
 }
 
+size_t encoderCallback(char* pBuffer, size_t nBytes) {
+  return nBytes;
+}
 
 static const int CAMERA_NUM = 0;
 static const SensorMode SENSOR_MODE = SM_1920x1080;
@@ -73,18 +76,13 @@ int main(int argc, char* argv[]) {
   unsigned int height = SENSOR_MODE_HEIGHT[SENSOR_MODE];
 
   //const std::pair<int, int> fps = {1, 10};
-  const std::pair<int, int> fps = {1, 1};
+  const std::pair<int, int> fps = {0, 1};
 
   Logger::setLogLevel(LogLevel::DEBUG);
 
 
-  if (camera.open(SENSOR_MODE) != MMAL_SUCCESS) {
+  if (camera.open(SENSOR_MODE, CaptureMode::STILL) != MMAL_SUCCESS) {
     Logger::error("Failed to open camera device\n");
-    return 1;
-  }
-
-  if (camera.openOutputFile(argv[1]) != MMAL_SUCCESS) {
-    Logger::error("Failed to open output file\n");
     return 1;
   }
 
@@ -111,11 +109,10 @@ int main(int argc, char* argv[]) {
       Logger::error("Failed to set cameraConfig\n");
       return 1;
     }
-    Logger::info("Camera configured. width=%u, height=%u\n",
-                 width, height);
+    Logger::info("Camera configured. width=%u, height=%u\n", width, height);
   }
 
-  {
+  if (0) {
     // Configure preview encoding
     const MMAL_VIDEO_FORMAT_T formatIn = {
       .width = align_up(width, 32),
@@ -153,7 +150,7 @@ int main(int argc, char* argv[]) {
 
   Logger::info("Still output configured. width=%u, height=%u\n", width, height);
 
-  {
+  if (0) {
     // Configure the video encoding
     const MMAL_VIDEO_FORMAT_T formatInVideo = {
       .width = align_up(width, 32),
@@ -163,8 +160,8 @@ int main(int argc, char* argv[]) {
     };
 
     // Make sure we have enough buffers
-    if (camera.getVideoOutputPort()->buffer_num < 3) {
-      camera.getVideoOutputPort()->buffer_num = 3;
+    if (camera.videoOutputPort()->buffer_num < 3) {
+      camera.videoOutputPort()->buffer_num = 3;
     }
 
     if (camera.setVideoFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420,
@@ -177,8 +174,6 @@ int main(int argc, char* argv[]) {
     Logger::info("Video format set. width=%u, height=%u\n",
                   formatInVideo.width, formatInVideo.height);
   }
-
-
 
   if (camera.configurePreview() != MMAL_SUCCESS) {
     return 1;
@@ -198,16 +193,17 @@ int main(int argc, char* argv[]) {
       || (camera.setBrightness(50, 100) != MMAL_SUCCESS)
       || (camera.setSaturation(0, 1) != MMAL_SUCCESS)
       || (camera.setISO(0) != MMAL_SUCCESS)
-      || (camera.setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_VIDEO_CAPTURE) != MMAL_SUCCESS)) {
+      || (camera.setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_STILLS_CAPTURE) != MMAL_SUCCESS)) {
     Logger::error("Failed to set camera parameters\n");
     return 1;
   }
 
   // Set up the encoder
   {
-    H264EncoderConfig encoderConfig = H264EncoderConfig::defaultConfig();
-    encoderConfig.framerate = { fps.first, fps.second };
-    if (camera.configureEncoder(encoderConfig) != MMAL_SUCCESS) {
+    PNGEncoderConfig encoderConfig{};
+    if (encoderConfig.configure(camera.encoderInputPort(),
+                                camera.encoderOutputPort()) != MMAL_SUCCESS)
+    {
       Logger::error("Failed to configure encoder\n");
       return 1;
     }
@@ -232,8 +228,8 @@ int main(int argc, char* argv[]) {
   }
 
   {
-    auto* encoderInput = camera.getEncoderInputPort();
-    auto* encoderOutput = camera.getEncoderOutputPort();
+    auto* encoderInput = camera.encoderInputPort();
+    auto* encoderOutput = camera.encoderOutputPort();
     float frameRateIn = encoderInput->format->es->video.frame_rate.num /
                   encoderInput->format->es->video.frame_rate.den;
     float frameRateOut = encoderOutput->format->es->video.frame_rate.num /
@@ -258,15 +254,13 @@ int main(int argc, char* argv[]) {
                   );
   }
 
-
-
-  if (camera.enableCallbacks() != MMAL_SUCCESS) {
+  if (camera.enableCallbacks(encoderCallback) != MMAL_SUCCESS) {
     Logger::error("Failed to enable camera callbacks\n");
     return 1;
   }
 
   {
-    MMAL_PORT_T* encoderOutput = camera.getEncoderOutputPort();
+    MMAL_PORT_T* encoderOutput = camera.encoderOutputPort();
     int n = mmal_queue_length(camera.getEncoderBufferPool()->queue);
     for (int q = 0; q < n; q++) {
       MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(camera.getEncoderBufferPool()->queue);
@@ -286,7 +280,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  for (int i = 0; i < time * 10; i++) {
+  for (unsigned int i = 0; i < time * 10; i++) {
     vcos_sleep(100);
   }
 

@@ -20,8 +20,31 @@
 
 #include <utility>
 #include <cstdint>
+#include <interface/mmal/mmal.h>
 
-struct H264EncoderConfig {
+struct BaseEncoderConfig {
+  BaseEncoderConfig()
+    : immutableInputEnabled{true},
+    inlineHeaderEnabled{false},
+    SPSTimingEnabled{false},
+    inlineVectorsEnabled{false}
+  { }
+
+  /**
+   * Configure the encoder input and output ports as necessary. The input port
+   * will probably be automatically configured when its source is connected.
+   * Base classes should override this method, but still call the base class'
+   * implementation.
+   */
+  virtual MMAL_STATUS_T configure(MMAL_PORT_T* input, MMAL_PORT_T* output);
+
+  bool immutableInputEnabled;
+  bool inlineHeaderEnabled;
+  bool SPSTimingEnabled;
+  bool inlineVectorsEnabled;
+};
+
+struct H264EncoderConfig : public BaseEncoderConfig {
   enum Profile {
     BASELINE,
     MAIN,
@@ -51,16 +74,47 @@ struct H264EncoderConfig {
    * Construct a config with some default values. (See the implementation for
    * the actual values that will be used.)
    */
-  static H264EncoderConfig defaultConfig();
+  H264EncoderConfig()
+  : H264EncoderConfig{
+    DEFAULT_BITRATE,
+    { 30, 1 },
+    Profile::HIGH,
+    Level::H264_42}
+  { }
+
+  H264EncoderConfig(uint32_t bitrate, Framerate framerate, Profile profile,
+      Level level)
+    : BaseEncoderConfig{},
+    bitrate{bitrate},
+    framerate{framerate},
+    profile{profile},
+    level{level}
+  { }
+
+  virtual MMAL_STATUS_T configure(MMAL_PORT_T* input, MMAL_PORT_T* output)
+    override;
 
   uint32_t bitrate;
   Framerate framerate;
   Profile profile;
   Level level;
-  bool immutableInputEnabled;
-  bool inlineHeaderEnabled;
-  bool SPSTimingEnabled;
-  bool inlineVectorsEnabled;
+
+  const uint32_t DEFAULT_BITRATE = 17000000;
 };
+
+struct PNGEncoderConfig : public BaseEncoderConfig {
+  PNGEncoderConfig() : BaseEncoderConfig{} { }
+
+  virtual MMAL_STATUS_T configure(MMAL_PORT_T* input, MMAL_PORT_T* output)
+    override;
+};
+
+struct JPEGEncoderConfig : public BaseEncoderConfig {
+  JPEGEncoderConfig() : BaseEncoderConfig{} { }
+
+  virtual MMAL_STATUS_T configure(MMAL_PORT_T* input, MMAL_PORT_T* output)
+    override;
+};
+
 
 #endif // ENCODER_CONFIG_HPP

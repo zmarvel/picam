@@ -18,7 +18,8 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 
-#include <fstream>
+#include <ostream>
+#include <functional>
 
 #include <interface/mmal/mmal.h>
 #include <interface/mmal/mmal_parameters_camera.h>
@@ -51,6 +52,11 @@ typedef enum {
   NUM_SENSOR_MODES,
 } SensorMode;
 
+enum class CaptureMode {
+  VIDEO,
+  STILL,
+};
+
 extern const unsigned int SENSOR_MODE_WIDTH[NUM_SENSOR_MODES];
 extern const unsigned int SENSOR_MODE_HEIGHT[NUM_SENSOR_MODES];
 
@@ -69,30 +75,26 @@ const int CAMERA_MAX_STILL_HEIGHT = 2464;
 class Camera {
 
   public:
+    typedef std::function<size_t(char* pBuffer, size_t nBytes)> encoderCallbackType;
+
     explicit Camera(int cameraNum);
     ~Camera();
 
     // TODO. Consumer-provided callbacks would probably be a better abstraction.
     // Maybe it doesn't make a lot of sense for this class to manage files.
 
-    /**
-     * Static method that the constructor will set up as a callback for control
-     * messages from the underlying driver.
-     */
-    static void controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
-    static void encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
-
     MMAL_COMPONENT_T* getCamera() const {
-      return camera;
+      return mCamera;
     }
 
     MMAL_COMPONENT_T* getEncoder() const {
-      return encoder;
+      return mEncoder;
     }
 
-    MMAL_PORT_T* getVideoOutputPort() const;
-    MMAL_PORT_T* getEncoderInputPort() const;
-    MMAL_PORT_T* getEncoderOutputPort() const;
+    MMAL_PORT_T* stillOutputPort() const;
+    MMAL_PORT_T* videoOutputPort() const;
+    MMAL_PORT_T* encoderInputPort() const;
+    MMAL_PORT_T* encoderOutputPort() const;
 
     /**
      * Create buffer pools for the video output, the two splitter outputs, and
@@ -112,7 +114,7 @@ class Camera {
      * Enable the callbacks for the second splitter output (the first splitter
      * output will be connected to the encoder input) and the encoder output.
      */
-    MMAL_STATUS_T enableCallbacks();
+    MMAL_STATUS_T enableCallbacks(encoderCallbackType encoderCallback);
 
     /**
      * Set up and enable connections. By default,
@@ -122,39 +124,13 @@ class Camera {
     MMAL_STATUS_T setUpConnections();
 
     /**
-     * Set up the output file where encoded video will be written. If another
-     * file is already open, it will be closed.
-     */
-    MMAL_STATUS_T openOutputFile(std::string filename);
-
-    /**
-     * Close the output file. If no file is open, this function will return a
-     * success status, but it will have no effect. On destruction of a Camera
-     * object, an open output file will be closed automatically.
-     */
-    MMAL_STATUS_T closeOutputFile();
-
-    /**
-     * Does the Camera class think an output file is already open?
-     */
-    bool isOutputFileOpen() const {
-      return encodedOutputOpen;
-    }
-
-    /**
-     * Write len bytes from data to the output file. If no file is open, this
-     * function will fail.
-     */
-    MMAL_STATUS_T writeOutput(char* data, size_t len);
-
-    /**
      * Allocate resources for the camera, and set it up.
      */
-    MMAL_STATUS_T open(SensorMode mode);
+    MMAL_STATUS_T open(SensorMode mode, CaptureMode captureMode);
 
     MMAL_STATUS_T configurePreview();
-    MMAL_STATUS_T configureEncoder(H264EncoderConfig& cfg);
 
+    MMAL_STATUS_T setCaptureMode(CaptureMode mode);
     MMAL_STATUS_T setSensorMode(SensorMode mode);
 
     MMAL_STATUS_T setVideoFormat(MMAL_FOURCC_T encoding,
@@ -283,8 +259,8 @@ class Camera {
     /**
      * Set the shutter speed in microseconds.
      */
-    void setShutterSpeed(uint32_t speed);
-    uint32_t getShutterSpeed();
+    MMAL_STATUS_T setShutterSpeed(uint32_t speed);
+    MMAL_STATUS_T getShutterSpeed(uint32_t& speed);
 
     /**
      * Configure privacy indicator policy.
@@ -306,25 +282,32 @@ class Camera {
     void setDigitalGain(int32_t num, int32_t den);
     void getDigitalGain(int32_t& num, int32_t& den);
     
+    encoderCallbackType encoderCallback();
 
   private:
-    int cameraNum;
+    /**
+     * Static method that the constructor will set up as a callback for control
+     * messages from the underlying driver.
+     */
+    static void controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
+    static void encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer);
+
+    int mCameraNum;
+    SensorMode mSensorMode;
 
     // Components
-    MMAL_COMPONENT_T* camera;
-    MMAL_COMPONENT_T* encoder;
-    MMAL_COMPONENT_T* preview;
+    MMAL_COMPONENT_T* mCamera;
+    MMAL_COMPONENT_T* mEncoder;
+    MMAL_COMPONENT_T* mPreview;
 
     // Buffer pools
-    MMAL_POOL_T* encoderPool;
+    MMAL_POOL_T* mEncoderPool;
 
     // Connections
-    MMAL_CONNECTION_T* videoEncoderConnection;
-    MMAL_CONNECTION_T* previewNullConnection;
+    MMAL_CONNECTION_T* mVideoEncoderConnection;
+    MMAL_CONNECTION_T* mPreviewNullConnection;
 
-    std::ofstream encodedOutput;
-    bool encodedOutputOpen;
-
+    encoderCallbackType mEncoderCallback;
 };
 
 #endif // CAMERA_HPP

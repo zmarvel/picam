@@ -16,6 +16,7 @@
  */
 
 #include <ios>
+#include <fstream>
 
 #include "camera.hpp"
 #include "logging.hpp"
@@ -47,57 +48,51 @@ const unsigned int SENSOR_MODE_HEIGHT[NUM_SENSOR_MODES] {
 static const std::string CAMERA_NS = "Camera: ";
 
 
-Camera::Camera(int cameraNum)
-  : cameraNum{cameraNum}
-  , camera{nullptr}
-  , encoder{nullptr}
-  , preview{nullptr}
-  , encoderPool{nullptr}
-  , videoEncoderConnection{nullptr}
-  , encodedOutput{}
-  , encodedOutputOpen{false}
+Camera::Camera(int mCameraNum)
+  : mCameraNum{mCameraNum}
+  , mCamera{nullptr}
+  , mEncoder{nullptr}
+  , mPreview{nullptr}
+  , mEncoderPool{nullptr}
+  , mVideoEncoderConnection{nullptr}
 {
 }
 
 Camera::~Camera() {
   // Disable ports so callbacks won't try to use resources that will be freed later
-  if ((camera != nullptr) && (mmal_port_disable(getEncoderOutputPort()) != MMAL_SUCCESS)) {
+  if ((mCamera != nullptr) && (mmal_port_disable(encoderOutputPort()) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to disable encoder output\n");
   }
 
-  if ((camera != nullptr) && (mmal_port_disable(getCamera()->control) != MMAL_SUCCESS)) {
+  if ((mCamera != nullptr) && (mmal_port_disable(getCamera()->control) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to disable encoder output\n");
   }
-
-  closeOutputFile();
 
   // Clean up connections
-  if ((videoEncoderConnection != nullptr) && (mmal_connection_destroy(videoEncoderConnection) != MMAL_SUCCESS)) {
+  if ((mVideoEncoderConnection != nullptr) && (mmal_connection_destroy(mVideoEncoderConnection) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to destroy video -> encoder connection\n");
   }
 
-
   // Clean up pools
-  if (encoderPool != nullptr) {
-    mmal_pool_destroy(encoderPool);
+  if (mEncoderPool != nullptr) {
+    mmal_pool_destroy(mEncoderPool);
   }
 
-
   // Clean up components
-  if ((camera != nullptr) && (mmal_component_destroy(camera) != MMAL_SUCCESS)) {
+  if ((mCamera != nullptr) && (mmal_component_destroy(mCamera) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to destroy camera component\n");
   }
 
-  if ((encoder != nullptr) && (mmal_component_destroy(encoder) != MMAL_SUCCESS)) {
+  if ((mEncoder != nullptr) && (mmal_component_destroy(mEncoder) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to destroy encoder component\n");
   }
 
-  if ((preview != nullptr) && (mmal_component_destroy(preview) != MMAL_SUCCESS)) {
+  if ((mPreview != nullptr) && (mmal_component_destroy(mPreview) != MMAL_SUCCESS)) {
     Logger::warning(__func__, "failed to destroy null preview component\n");
   }
 }
 
-MMAL_STATUS_T Camera::open(SensorMode mode) {
+MMAL_STATUS_T Camera::open(SensorMode mSensorMode, CaptureMode captureMode) {
   MMAL_STATUS_T status;
 
   //
@@ -105,30 +100,30 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
   //
 
   // Allocate the camera component
-  status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &camera);
+  status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &mCamera);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "failed to allocate camera resources\n");
     return status;
   }
 
   // Specify the camera number
-  status = mmal_port_parameter_set_uint32(camera->control,
+  status = mmal_port_parameter_set_uint32(mCamera->control,
                                           MMAL_PARAMETER_CAMERA_NUM,
-                                          cameraNum);
+                                          mCameraNum);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "failed to set camera number\n");
     return status;
   }
 
-  if (camera->output_num < 3) {
+  if (mCamera->output_num < 3) {
     Logger::error(__func__, "invalid camera output number\n");
     return MMAL_ENOSYS;
   }
 
   // Configure the resolution
-  status = mmal_port_parameter_set_uint32(camera->control,
+  status = mmal_port_parameter_set_uint32(mCamera->control,
                                           MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
-                                          mode);
+                                          mSensorMode);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "failed to set sensor mode\n");
     return status;
@@ -144,13 +139,14 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
   // Set up the encoder
   //
 
-  status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_ENCODER, &encoder);
+  status = setCaptureMode(captureMode);
+
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "failed to allocate encoder resources\n");
     return status;
   }
 
-  if ((encoder->input_num < 1) || (encoder->output_num < 1)) {
+  if ((mEncoder->input_num < 1) || (mEncoder->output_num < 1)) {
     Logger::error(__func__, "invalid encoder input/output number\n");
     return MMAL_ENOSYS;
   }
@@ -161,13 +157,13 @@ MMAL_STATUS_T Camera::open(SensorMode mode) {
 MMAL_STATUS_T Camera::configurePreview() {
   MMAL_STATUS_T status;
 
-  status = mmal_component_create("vc.null_sink", &preview);
+  status = mmal_component_create("vc.null_sink", &mPreview);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "Failed to create null preview component\n");
     return status;
   }
 
-  status = mmal_component_enable(preview);
+  status = mmal_component_enable(mPreview);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "Failed to enable null preview component\n");
     return status;
@@ -176,177 +172,46 @@ MMAL_STATUS_T Camera::configurePreview() {
   return status;
 }
 
-MMAL_STATUS_T Camera::configureEncoder(H264EncoderConfig& cfg) {
-  // Now let's set up the encoder
-  MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
-  MMAL_PORT_T* encoderInput = getEncoderInputPort();
-  MMAL_STATUS_T status;
-
-  mmal_format_copy(encoderOutput->format, encoderInput->format);
-  encoderOutput->format->encoding = MMAL_ENCODING_H264;
-
-  encoderOutput->format->bitrate = cfg.bitrate;
-  Logger::debug("Encoding using bitrage %u\n", cfg.bitrate);
-
-  encoderOutput->buffer_size = encoderOutput->buffer_size_recommended;
-  if (encoderOutput->buffer_size < encoderOutput->buffer_size_min) {
-    encoderOutput->buffer_size = encoderOutput->buffer_size_min;
+MMAL_STATUS_T Camera::setCaptureMode(CaptureMode mode) {
+  MMAL_STATUS_T status = MMAL_SUCCESS;
+  if (mEncoder != nullptr) {
+    status = mmal_component_destroy(mEncoder);
+    if (status != MMAL_SUCCESS) {
+      Logger::error(__func__, "Failed to destroy previous encoder\n");
+      return status;
+    }
   }
 
-  encoderOutput->buffer_num = encoderOutput->buffer_num_recommended;
-  if (encoderOutput->buffer_num < encoderOutput->buffer_num_min) {
-    encoderOutput->buffer_num = encoderOutput->buffer_num_min;
+  switch (mode) {
+    case CaptureMode::STILL:
+      status = mmal_component_create(MMAL_COMPONENT_DEFAULT_IMAGE_ENCODER,
+                                     &mEncoder);
+      break;
+    case CaptureMode::VIDEO:
+      status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_ENCODER,
+                                     &mEncoder);
+      break;
+    default:
+      status = MMAL_EINVAL;
   }
 
-  Logger::debug("Encoder output configured for %u buffers of size %u.\n",
-                encoderOutput->buffer_num,
-                encoderOutput->buffer_size);
-  Logger::debug("Recommends %u buffers of size %u with respective mins %u and %u.\n",
-                encoderOutput->buffer_num_recommended,
-                encoderOutput->buffer_size_recommended,
-                encoderOutput->buffer_num_min,
-                encoderOutput->buffer_size_min
-                );
-                
-
-  // According to RaspiVid.c, we should set the framerate to 0 to make sure
-  // connecting it to the input port causes it to get set accordingly
-  //encoderOutput->format->es->video.frame_rate.num = cfg.framerate.first;
-  //encoderOutput->format->es->video.frame_rate.den = cfg.framerate.second;
-  encoderOutput->format->es->video.frame_rate.num = 0;
-  encoderOutput->format->es->video.frame_rate.den = 1;
-
-  status = mmal_port_format_commit(encoderOutput);
   if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to commit encoder output format\n");
-    return status;
+    Logger::error(__func__, "Failed to create \n");
   }
 
-
-  MMAL_VIDEO_PROFILE_T profile = MMAL_VIDEO_PROFILE_DUMMY;
-  switch (cfg.profile) {
-    case H264EncoderConfig::Profile::BASELINE:
-      profile = MMAL_VIDEO_PROFILE_H264_BASELINE;
-      break;
-    case H264EncoderConfig::Profile::MAIN:
-      profile = MMAL_VIDEO_PROFILE_H264_MAIN;
-      break;
-    case H264EncoderConfig::Profile::HIGH:
-      profile = MMAL_VIDEO_PROFILE_H264_HIGH;
-      break;
-  }
-
-  if (profile == MMAL_VIDEO_PROFILE_DUMMY) {
-    Logger::error(__func__, "Invalid video profile\n");
-    return MMAL_EINVAL;
-  }
-
-  // TODO: does the hardware even support all these levels?
-  MMAL_VIDEO_LEVEL_T level = MMAL_VIDEO_LEVEL_DUMMY;
-  switch (cfg.level) {
-    case H264EncoderConfig::Level::H264_2:
-      level = MMAL_VIDEO_LEVEL_H264_2;
-      break;
-    case H264EncoderConfig::Level::H264_21:
-      level = MMAL_VIDEO_LEVEL_H264_21;
-      break;
-    case H264EncoderConfig::Level::H264_22:
-      level = MMAL_VIDEO_LEVEL_H264_22;
-      break;
-    case H264EncoderConfig::Level::H264_3:
-      level = MMAL_VIDEO_LEVEL_H264_3;
-      break;
-    case H264EncoderConfig::Level::H264_31:
-      level = MMAL_VIDEO_LEVEL_H264_31;
-      break;
-    case H264EncoderConfig::Level::H264_32:
-      level = MMAL_VIDEO_LEVEL_H264_32;
-      break;
-    case H264EncoderConfig::Level::H264_4:
-      level = MMAL_VIDEO_LEVEL_H264_4;
-      break;
-    case H264EncoderConfig::Level::H264_41:
-      level = MMAL_VIDEO_LEVEL_H264_41;
-      break;
-    case H264EncoderConfig::Level::H264_42:
-      level = MMAL_VIDEO_LEVEL_H264_42;
-      break;
-    case H264EncoderConfig::Level::H264_5:
-      level = MMAL_VIDEO_LEVEL_H264_5;
-      break;
-    case H264EncoderConfig::Level::H264_51:
-      level = MMAL_VIDEO_LEVEL_H264_51;
-      break;
-  }
-
-  if (level == MMAL_VIDEO_LEVEL_DUMMY) {
-    Logger::error(__func__, "Invalid video profile level\n");
-    return MMAL_EINVAL;
-  }
-
-  MMAL_PARAMETER_VIDEO_PROFILE_T profileParam = {
-    .hdr = { MMAL_PARAMETER_PROFILE, sizeof(MMAL_PARAMETER_VIDEO_PROFILE_T) },
-    .profile = {
-      { profile, level },
-    },
-  };
-
-  status = mmal_port_parameter_set(encoderOutput, &profileParam.hdr);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to apply H264 profile\n");
-    return status;
-  }
-
-
-  status = mmal_port_parameter_set_boolean(encoderInput,
-                                           MMAL_PARAMETER_VIDEO_IMMUTABLE_INPUT,
-                                           cfg.immutableInputEnabled ? MMAL_TRUE : MMAL_FALSE);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to configure encoder input as immutable\n");
-    return status;
-  }
-
-  status = mmal_port_parameter_set_boolean(encoderOutput,
-                                           MMAL_PARAMETER_VIDEO_ENCODE_INLINE_HEADER,
-                                           cfg.inlineHeaderEnabled ? MMAL_TRUE : MMAL_FALSE);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to configure encoder to use inline header\n");
-    return status;
-  }
-
-  status = mmal_port_parameter_set_boolean(encoderOutput,
-                                           MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING,
-                                           cfg.SPSTimingEnabled ? MMAL_TRUE : MMAL_FALSE);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to configure encoder SPS timing\n");
-    return status;
-  }
-
-  status = mmal_port_parameter_set_boolean(encoderOutput,
-                                           MMAL_PARAMETER_VIDEO_ENCODE_INLINE_VECTORS,
-                                           cfg.inlineVectorsEnabled ? MMAL_TRUE : MMAL_FALSE);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to configure encoder inline motion vectors\n");
-    return status;
-  }
-
-  status = mmal_port_format_commit(encoderOutput);
-  if (status != MMAL_SUCCESS) {
-    Logger::error(__func__, "Failed to commit encoder output port config\n");
-    return status;
-  }
-
-  return enableEncoder();
+  return status;
 }
 
 MMAL_STATUS_T Camera::setSensorMode(SensorMode mode) {
-  return mmal_port_parameter_set_uint32(camera->control,
+  return mmal_port_parameter_set_uint32(mCamera->control,
                                         MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
                                         mode);
 }
 
-static void printBufferFlags(const char* indent, const char* sep,
-                             MMAL_BUFFER_HEADER_T* buffer) {
+// Building with GCC 6.3.0, [[maybe_unused]] is not yet supported, even with
+// -std=c++17.
+__attribute__((unused)) static void printBufferFlags(const char* indent,
+    const char* sep, MMAL_BUFFER_HEADER_T* buffer) {
   if (indent == nullptr) {
     indent = "";
   }
@@ -435,6 +300,10 @@ static void printBufferFlags(const char* indent, const char* sep,
   }
 }
 
+//Camera::encoderCallbackType encoderCallback() {
+//  return std::move(mEncoderCallback);
+//}
+
 void Camera::controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   Logger::debug(CAMERA_NS, "Camera::controlCallback called with cmd=0x%x\n", buffer->cmd);
 }
@@ -444,19 +313,25 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   Camera* pCamera = reinterpret_cast<Camera*>(port->userdata);
 
   size_t nBytes = 0;
-  if (pCamera->isOutputFileOpen()) {
-    mmal_buffer_header_mem_lock(buffer);
-    nBytes = buffer->length;
-    pCamera->writeOutput(reinterpret_cast<char*>(buffer->data + buffer->offset),
-                         nBytes);
+  static size_t nRcvd = 0;
+  mmal_buffer_header_mem_lock(buffer);
+  nBytes = buffer->length;
+  pCamera->mEncoderCallback(
+      reinterpret_cast<char*>(buffer->data + buffer->offset), nBytes);
     mmal_buffer_header_mem_unlock(buffer);
-    printf("%u\n", nBytes);
-    //Logger::debug(__func__, "Wrote %u B to output file\n", nBytes);
-  } else {
-    Logger::debug(__func__, "Got called but output file is closed\n");
-  }
+  printf("%u\n", nBytes);
+  //Logger::debug(__func__, "Wrote %u B to output file\n", nBytes);
   //printBufferFlags(nullptr, " ", buffer);
   //puts("");
+  //
+  nRcvd += nBytes;
+  if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED) {
+    Logger::warning("Buffer transmission failed\n");
+    nRcvd = 0;
+  } else if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
+    Logger::info("Frame received: %u bytes\n", nRcvd);
+    nRcvd = 0;
+  }
 
   mmal_buffer_header_release(buffer);
 
@@ -480,7 +355,7 @@ enum {
 MMAL_STATUS_T Camera::setVideoFormat(MMAL_FOURCC_T encoding,
                                      MMAL_FOURCC_T encodingVariant,
                                      const MMAL_VIDEO_FORMAT_T& videoFormat) {
-  MMAL_PORT_T* videoPort = getVideoOutputPort();
+  MMAL_PORT_T* videoPort = videoOutputPort();
   MMAL_ES_FORMAT_T* format = videoPort->format;
   //format->type = MMAL_ES_TYPE_VIDEO;
   format->encoding = encoding;
@@ -521,24 +396,28 @@ MMAL_STATUS_T Camera::setStillFormat(MMAL_FOURCC_T encoding,
   return mmal_port_format_commit(port);
 }
 
-MMAL_PORT_T* Camera::getVideoOutputPort() const {
+MMAL_PORT_T* Camera::stillOutputPort() const {
+  return getCamera()->output[STILL_PORT];
+}
+
+MMAL_PORT_T* Camera::videoOutputPort() const {
   return getCamera()->output[VIDEO_PORT];
 }
 
-MMAL_PORT_T* Camera::getEncoderInputPort() const {
+MMAL_PORT_T* Camera::encoderInputPort() const {
   return getEncoder()->input[0];
 }
 
-MMAL_PORT_T* Camera::getEncoderOutputPort() const {
+MMAL_PORT_T* Camera::encoderOutputPort() const {
   return getEncoder()->output[0];
 }
 
 MMAL_STATUS_T Camera::createBufferPools() {
   {
-    MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
-    encoderPool = mmal_port_pool_create(encoderOutput, encoderOutput->buffer_num,
+    MMAL_PORT_T* encoderOutput = encoderOutputPort();
+    mEncoderPool = mmal_port_pool_create(encoderOutput, encoderOutput->buffer_num,
                                         encoderOutput->buffer_size);
-    if (encoderPool == nullptr) {
+    if (mEncoderPool == nullptr) {
       Logger::error(__func__, "Failed to allocate encoder output buffer pool\n");
       return MMAL_ENOMEM;
     }
@@ -551,12 +430,12 @@ MMAL_STATUS_T Camera::createBufferPools() {
 }
 
 MMAL_POOL_T* Camera::getEncoderBufferPool() {
-  return encoderPool;
+  return mEncoderPool;
 }
 
 MMAL_STATUS_T Camera::enableCamera() {
   MMAL_STATUS_T status;
-  status = mmal_component_enable(camera);
+  status = mmal_component_enable(mCamera);
   if (status != MMAL_SUCCESS) {
     Logger::error(CAMERA_NS, "Failed to enable camera component\n");
     return status;
@@ -566,7 +445,7 @@ MMAL_STATUS_T Camera::enableCamera() {
 }
 
 MMAL_STATUS_T Camera::enableEncoder() {
-  MMAL_STATUS_T status = mmal_component_enable(encoder);
+  MMAL_STATUS_T status = mmal_component_enable(mEncoder);
   if (status != MMAL_SUCCESS) {
     Logger::error(CAMERA_NS, "Failed to enable encoder component\n");
     return status;
@@ -575,11 +454,11 @@ MMAL_STATUS_T Camera::enableEncoder() {
   return status;
 }
 
-MMAL_STATUS_T Camera::enableCallbacks() {
+MMAL_STATUS_T Camera::enableCallbacks(encoderCallbackType encoderCallback) {
   MMAL_STATUS_T status;
 
   {
-    MMAL_PORT_T* encoderOutput = getEncoderOutputPort();
+    MMAL_PORT_T* encoderOutput = encoderOutputPort();
     encoderOutput->userdata = reinterpret_cast<MMAL_PORT_USERDATA_T*>(this);
     status = mmal_port_enable(encoderOutput, Camera::encoderCallback);
     if (status != MMAL_SUCCESS) {
@@ -587,6 +466,8 @@ MMAL_STATUS_T Camera::enableCallbacks() {
       return status;
     }
   }
+  //mEncoderCallback = std::bind(encoderCallback, std::placeholders::_1, std::placeholders::_2);
+  mEncoderCallback = std::move(encoderCallback);
 
   return status;
 }
@@ -594,11 +475,11 @@ MMAL_STATUS_T Camera::enableCallbacks() {
 MMAL_STATUS_T Camera::setUpConnections() {
   {
     MMAL_PORT_T
-      * videoOutput = getVideoOutputPort(),
-      * encoderInput = getEncoderInputPort();
+      * videoOutput = videoOutputPort(),
+      * encoderInput = encoderInputPort();
     MMAL_STATUS_T status;
     // video -> encoder
-    status = mmal_connection_create(&videoEncoderConnection,
+    status = mmal_connection_create(&mVideoEncoderConnection,
                                     videoOutput, encoderInput,
                                     MMAL_CONNECTION_FLAG_TUNNELLING |
                                     MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
@@ -607,7 +488,7 @@ MMAL_STATUS_T Camera::setUpConnections() {
       return status;
     }
 
-    status = mmal_connection_enable(videoEncoderConnection);
+    status = mmal_connection_enable(mVideoEncoderConnection);
     if (status != MMAL_SUCCESS) {
       Logger::error(__func__, "Failed to enable video -> encoder connection\n");
       return status;
@@ -619,9 +500,9 @@ MMAL_STATUS_T Camera::setUpConnections() {
     // this doesn't change anything??
     MMAL_PORT_T
       * previewOutput = getCamera()->output[PREVIEW_PORT],
-      * nullInput = preview->input[0];
+      * nullInput = mPreview->input[0];
     MMAL_STATUS_T status;
-    status = mmal_connection_create(&previewNullConnection,
+    status = mmal_connection_create(&mPreviewNullConnection,
                                     previewOutput, nullInput,
                                     MMAL_CONNECTION_FLAG_TUNNELLING |
                                     MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
@@ -630,7 +511,7 @@ MMAL_STATUS_T Camera::setUpConnections() {
       return status;
     }
 
-    status = mmal_connection_enable(previewNullConnection);
+    status = mmal_connection_enable(mPreviewNullConnection);
     if (status != MMAL_SUCCESS) {
       Logger::error(__func__, "Failed to enable preview -> null connection\n");
       return status;
@@ -640,58 +521,19 @@ MMAL_STATUS_T Camera::setUpConnections() {
   return MMAL_SUCCESS;
 }
 
-MMAL_STATUS_T Camera::openOutputFile(std::string filename) {
-  // If another file is already open, make sure it gets closed.
-  if (encodedOutputOpen) {
-    closeOutputFile();
-  }
-
-  encodedOutput.open(filename,
-                     std::ios_base::out | std::ios_base::trunc);
-
-  if (encodedOutput.fail()) {
-    Logger::error(__func__, "Failed to open file %s for writing\n", filename.c_str());
-    return MMAL_ENOENT;
-  }
-  encodedOutputOpen = true;
-
-  return MMAL_SUCCESS;
-}
-
-MMAL_STATUS_T Camera::closeOutputFile() {
-  if (encodedOutputOpen) {
-    encodedOutputOpen = false;
-    encodedOutput.close();
-  }
- 
-  return MMAL_SUCCESS;
-}
-
-MMAL_STATUS_T Camera::writeOutput(char* data, size_t len) {
-  if (!encodedOutputOpen) {
-    Logger::error(__func__, "Output file is not open\n");
-    return MMAL_ENOENT;
-  }
-
-  encodedOutput.write(data, len);
-
-  return MMAL_SUCCESS;
-}
-
-
 MMAL_STATUS_T Camera::setAWBMode(MMAL_PARAM_AWBMODE_T mode) {
   MMAL_PARAMETER_AWBMODE_T param = {
     .hdr = { MMAL_PARAMETER_AWB_MODE, sizeof(MMAL_PARAMETER_AWBMODE_T) },
     .value = mode,
   };
-  return mmal_port_parameter_set(camera->control, &param.hdr);
+  return mmal_port_parameter_set(mCamera->control, &param.hdr);
 }
 
 MMAL_STATUS_T Camera::getAWBMode(MMAL_PARAM_AWBMODE_T& mode) {
   MMAL_PARAMETER_AWBMODE_T param = {
     .hdr = { MMAL_PARAMETER_AWB_MODE, sizeof(MMAL_PARAMETER_AWBMODE_T) },
   };
-  MMAL_STATUS_T status = mmal_port_parameter_get(camera->control, &param.hdr);
+  MMAL_STATUS_T status = mmal_port_parameter_get(mCamera->control, &param.hdr);
   mode = param.value;
   return status;
 }
@@ -703,22 +545,28 @@ MMAL_STATUS_T Camera::setColorEffect(bool enabled, uint32_t u, uint32_t v) {
     .u = u,
     .v = v,
   };
-  return mmal_port_parameter_set(camera->control, &param.hdr);
+  return mmal_port_parameter_set(mCamera->control, &param.hdr);
 }
 
 MMAL_STATUS_T Camera::getColorEffect(bool& enable, uint32_t& u, uint32_t& v) {
   MMAL_PARAMETER_COLOURFX_T param = {
     .hdr = { MMAL_PARAMETER_COLOUR_EFFECT, sizeof(MMAL_PARAMETER_COLOURFX_T) },
   };
-  MMAL_STATUS_T status = mmal_port_parameter_get(camera->control, &param.hdr); enable = param.enable; u = param.u; v = param.v; return status; }
+
+  MMAL_STATUS_T status = mmal_port_parameter_get(mCamera->control, &param.hdr);
+  enable = param.enable;
+  u = param.u;
+  v = param.v;
+  return status;
+}
 
 MMAL_STATUS_T Camera::enableCapture() {
-  return mmal_port_parameter_set_boolean(getVideoOutputPort(),
+  return mmal_port_parameter_set_boolean(videoOutputPort(),
                                          MMAL_PARAMETER_CAPTURE, MMAL_TRUE);
 }
 
 MMAL_STATUS_T Camera::disableCapture() {
-  return mmal_port_parameter_set_boolean(getVideoOutputPort(),
+  return mmal_port_parameter_set_boolean(videoOutputPort(),
                                          MMAL_PARAMETER_CAPTURE, MMAL_FALSE);
 }
 
@@ -727,49 +575,54 @@ MMAL_STATUS_T Camera::setExposureMode(MMAL_PARAM_EXPOSUREMODE_T mode) {
     .hdr = { MMAL_PARAMETER_EXPOSURE_MODE, sizeof(MMAL_PARAMETER_EXPOSUREMODE_T) },
     .value = mode,
   };
-  return mmal_port_parameter_set(camera->control, &param.hdr);
+  return mmal_port_parameter_set(mCamera->control, &param.hdr);
 }
 
 MMAL_STATUS_T Camera::getExposureMode(MMAL_PARAM_EXPOSUREMODE_T& mode) {
   MMAL_PARAMETER_EXPOSUREMODE_T param = {
     .hdr = { MMAL_PARAMETER_EXPOSURE_MODE, sizeof(MMAL_PARAMETER_EXPOSUREMODE_T) },
   };
-  MMAL_STATUS_T status = mmal_port_parameter_set(camera->control, &param.hdr);
+  MMAL_STATUS_T status = mmal_port_parameter_set(mCamera->control, &param.hdr);
   mode = param.value;
   return status;
 }
 
 MMAL_STATUS_T Camera::setCameraConfig(const MMAL_PARAMETER_CAMERA_CONFIG_T& config) {
-  return mmal_port_parameter_set(camera->control, &config.hdr);
+  return mmal_port_parameter_set(mCamera->control, &config.hdr);
 }
 
 MMAL_STATUS_T Camera::setSharpness(int32_t num, int32_t den) {
-  return mmal_port_parameter_set_rational(camera->control,
+  return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_SHARPNESS,
                                           { num, den });
 }
 
 MMAL_STATUS_T Camera::setContrast(int32_t num, int32_t den) {
-  return mmal_port_parameter_set_rational(camera->control,
+  return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_CONTRAST,
                                           { num, den });
 }
 
 MMAL_STATUS_T Camera::setBrightness(int32_t num, int32_t den) {
-  return mmal_port_parameter_set_rational(camera->control,
+  return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_BRIGHTNESS,
                                           { num, den });
 }
 
 MMAL_STATUS_T Camera::setSaturation(int32_t num, int32_t den) {
-  return mmal_port_parameter_set_rational(camera->control,
+  return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_SATURATION,
                                           { num, den });
 }
 
 MMAL_STATUS_T Camera::setISO(uint32_t iso) {
-  return mmal_port_parameter_set_uint32(camera->control, MMAL_PARAMETER_ISO,
+  return mmal_port_parameter_set_uint32(mCamera->control, MMAL_PARAMETER_ISO,
                                         iso);
+}
+
+MMAL_STATUS_T Camera::setShutterSpeed(uint32_t speed) {
+  return mmal_port_parameter_set_uint32(mCamera->control,
+                                        MMAL_PARAMETER_SHUTTER_SPEED, speed);
 }
 
 MMAL_STATUS_T Camera::setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T useCase) {
@@ -780,5 +633,5 @@ MMAL_STATUS_T Camera::setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T useCase) {
     },
     .use_case = useCase,
   };
-  return mmal_port_parameter_set(camera->control, &param.hdr);
+  return mmal_port_parameter_set(mCamera->control, &param.hdr);
 }
