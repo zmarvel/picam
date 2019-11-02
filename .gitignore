@@ -32,3 +32,7 @@
 *.app
 
 main
+
+*.264
+*.jpeg
+*.png

@@ -1,0 +1,45 @@
+
+syntax = "proto3";
+
+// TODO: Some of these are represented as strings but should be enums (e.g.
+// awb_mode)
+message Image {
+    message Metadata {
+    int32 time_s = 1;
+    int32 time_us = 2;
+    float latitude = 3;
+    float longitude = 4;
+    float altitude = 5;
+    int32 width = 6;
+    int32 height = 7;
+    string encoding = 8;
+    float analog_gain = 9;
+    float awb_gain_red = 10;
+    float awb_gain_blue = 11;
+    string awb_mode = 12;
+    int32 brightness = 13;
+    int32 contrast = 14;
+    float digital_gain = 15;
+    string drc_strength = 16;
+    int32 exposure_compensation = 17;
+    string exposure_mode = 18;
+    int32 exposure_speed = 19;
+    bool hflip = 20;
+    bool image_denoise = 21;
+    //image_effect string,
+    int32 iso = 22;
+    //meter_mode string,
+    int32 rotation = 23;
+    int32 saturation = 24;
+    int32 sharpness = 25;
+    int32 shutter_speed = 26;
+    bool vflip = 27;
+    //video_denoise bool,
+    //video_stabilization bool,
+    int32 roi_x = 28;
+    int32 roi_y = 29;
+    int32 roi_w = 30;
+    int32 roi_h = 31;
+    }
+    
+}
