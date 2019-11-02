@@ -50,8 +50,18 @@ static const int H264_BITRATE = 17000000;
 int main(int argc, char* argv[]) {
 
   if (argc < 2) {
-    std::cout << "USAGE: " << argv[0] << " <output file>" << std::endl;
+    std::cout << "USAGE: " << argv[0] << " <output file> [<record time in s>]"
+      << std::endl;
     return 1;
+  }
+
+  unsigned int time = 1;
+  if (argc > 2) {
+    time = std::atoi(argv[2]);
+    // If we can't parse the time or it's invalid, reset to 1
+    if (time < 1) {
+      time = 1;
+    }
   }
 
   bcm_host_init();
@@ -61,6 +71,8 @@ int main(int argc, char* argv[]) {
 
   unsigned int width = SENSOR_MODE_WIDTH[SENSOR_MODE];
   unsigned int height = SENSOR_MODE_HEIGHT[SENSOR_MODE];
+
+  const unsigned int fps = 10;
 
   Logger::setLogLevel(LogLevel::DEBUG);
 
@@ -108,7 +120,7 @@ int main(int argc, char* argv[]) {
       .width = align_up(width, 32),
       .height = align_up(height, 16),
       .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { 30, 1 },
+      .frame_rate = { fps, 1 },
     };
 
     if (camera.setPreviewFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420, formatIn)
@@ -146,7 +158,7 @@ int main(int argc, char* argv[]) {
       .width = align_up(width, 32),
       .height = align_up(height, 16),
       .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { 30, 1 },
+      .frame_rate = { fps, 1 },
     };
 
     // Make sure we have enough buffers
@@ -193,6 +205,7 @@ int main(int argc, char* argv[]) {
   // Set up the encoder
   {
     H264EncoderConfig encoderConfig = H264EncoderConfig::defaultConfig();
+    encoderConfig.framerate = { fps, 1 };
     if (camera.configureEncoder(encoderConfig) != MMAL_SUCCESS) {
       Logger::error("Failed to configure encoder\n");
       return 1;
@@ -272,7 +285,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  for (int i = 0; i < 20; i++) {
+  for (int i = 0; i < time * 10; i++) {
     vcos_sleep(100);
   }
 
