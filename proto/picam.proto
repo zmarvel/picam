@@ -41,6 +41,5 @@ message Image {
         int32 roi_w = 30;
         int32 roi_h = 31;
     }
-    int32 size = 1;
     Metadata metadata = 2;
 }

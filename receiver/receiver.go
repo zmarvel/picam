@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"picam"
+	"encoding/binary"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -50,10 +51,17 @@ func handleConnection(conn net.Conn) {
 	log.Printf("Connection with %v established\n", conn.RemoteAddr())
 	done := false
 	for !done {
+		var size int32 = 0
+		err := binary.Read(conn, binary.BigEndian, &size)
+		if err != nil {
+			log.Printf("Failed to read size\n")
+			done = true
+			break
+		}
+
 		var imageMessage picam.Image
-		buffer := make([]uint8, 4096)
-		size := 0
-		for read := 0; read < size; {
+		buffer := make([]uint8, size)
+		for read := 0; read < int(size); {
 			nRead, err := conn.Read(buffer[read:])
 			if err != nil {
 				// We encountered an error--exit the goroutine
@@ -61,15 +69,9 @@ func handleConnection(conn net.Conn) {
 				done = true
 				break
 			}
-			if read == 0 {
-				// This is the start of the packet. The size is at the beginning, so
-				// figure out how much there is to read.
-				proto.Unmarshal(buffer, &imageMessage)
-				size = int(imageMessage.Size)
-				read = 0
-			}
 			read += nRead
 		}
-		fmt.Printf("Read Image (%v bytes)\n", imageMessage.Size)
+		proto.Unmarshal(buffer, &imageMessage)
+		fmt.Printf("Read Image (%v bytes)\n", size)
 	}
 }
