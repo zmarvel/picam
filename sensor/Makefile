@@ -4,6 +4,7 @@ EXE = main
 SRCS := src/main.cpp \
   src/camera.cpp \
   src/encoder_config.cpp \
+  proto/picam.pb.cc \
   lib/cpp-logging/logging.cpp \
 
 OBJS := $(SRCS:%.cpp=%.o)
@@ -11,6 +12,7 @@ DEPS := $(SRCS:%.cpp=%.d)
 
 INCLUDES := \
   include \
+  proto \
   lib/cpp-logging \
 
 INCDIRS := $(addprefix -I,$(INCLUDES))
@@ -30,10 +32,19 @@ LDFLAGS += $(shell pkg-config --libs mmal)
 
 all: $(EXE)
 
+.PHONY: proto
+proto:
+	make -C ../proto
+
+$(OBJS): proto
+
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 %.o: %.cpp
+	$(CXX) -c $(CXXFLAGS) -o $@ $<
+
+%.o: %.cc
 	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
 $(EXE): $(OBJS)
