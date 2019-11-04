@@ -1,28 +1,29 @@
-
-
 EXE = main
-SRCS := src/main.cpp \
-  src/camera.cpp \
-  src/encoder_config.cpp \
-  proto/picam.pb.cc \
-  lib/cpp-logging/logging.cpp \
+SRCS := src/main.cpp src/camera.cpp \
+	src/encoder_config.cpp \
+	lib/cpp-logging/logging.cpp \
+	proto/picam.pb.cpp \
+
 
 OBJS := $(SRCS:%.cpp=%.o)
 DEPS := $(SRCS:%.cpp=%.d)
 
 INCLUDES := \
-  include \
-  proto \
-  lib/cpp-logging \
+	include \
+	proto \
+	lib/cpp-logging \
+
 
 INCDIRS := $(addprefix -I,$(INCLUDES))
 CFLAGS += -Wall -MD -std=gnu99 -g $(INCDIRS)
 CXXFLAGS += -Wall -MD -std=gnu++17 -g $(INCDIRS)
-LDFLAGS += -Wall -g
+
+LIBS := -lprotobuf
+LDFLAGS += -Wall -g $(LIBS)
 
 ifdef WERROR
-    CFLAGS += -Werror
-    CXXFLAGS += -Werror
+	CFLAGS += -Werror
+	CXXFLAGS += -Werror
 endif
 
 # mmal
@@ -32,19 +33,16 @@ LDFLAGS += $(shell pkg-config --libs mmal)
 
 all: $(EXE)
 
-.PHONY: proto
-proto:
-	make -C ../proto
+.PHONY: proto_defs
+proto_defs:
+	$(MAKE) -C ../proto sensor
 
-$(OBJS): proto
+proto/picam.pb.cpp: proto_defs
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 %.o: %.cpp
-	$(CXX) -c $(CXXFLAGS) -o $@ $<
-
-%.o: %.cc
 	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
 $(EXE): $(OBJS)
@@ -53,6 +51,8 @@ $(EXE): $(OBJS)
 .PHONY: clean
 clean:
 	rm -f $(EXE) $(OBJS) $(DEPS) tags
+	make -C ../proto sensor_clean
+
 
 .PHONY: ctags
 ctags: $(SRCS)

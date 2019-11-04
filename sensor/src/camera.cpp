@@ -308,6 +308,7 @@ void Camera::controlCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   Logger::debug(CAMERA_NS, "Camera::controlCallback called with cmd=0x%x\n", buffer->cmd);
 }
 
+static std::string imageBuffer{};
 void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   //Logger::debug(CAMERA_NS, "Camera::encoderCallback called\n");
   Camera* pCamera = reinterpret_cast<Camera*>(port->userdata);
@@ -316,19 +317,17 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   static size_t nRcvd = 0;
   mmal_buffer_header_mem_lock(buffer);
   nBytes = buffer->length;
-  pCamera->mEncoderCallback(
-      reinterpret_cast<char*>(buffer->data + buffer->offset), nBytes);
-    mmal_buffer_header_mem_unlock(buffer);
+  imageBuffer.append(reinterpret_cast<char*>(buffer->data + buffer->offset), nBytes);
+  mmal_buffer_header_mem_unlock(buffer);
   printf("%u\n", nBytes);
-  //Logger::debug(__func__, "Wrote %u B to output file\n", nBytes);
-  //printBufferFlags(nullptr, " ", buffer);
-  //puts("");
-  //
+
   nRcvd += nBytes;
   if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED) {
     Logger::warning("Buffer transmission failed\n");
     nRcvd = 0;
   } else if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
+    pCamera->mEncoderCallback(imageBuffer);
+    imageBuffer.clear();
     Logger::info("Frame received: %u bytes\n", nRcvd);
     nRcvd = 0;
   }
