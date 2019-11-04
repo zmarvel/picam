@@ -42,4 +42,5 @@ message Image {
         int32 roi_h = 31;
     }
     Metadata metadata = 2;
+    bytes data = 3;
 }
