@@ -18,8 +18,12 @@
 
 #include <cstdio>
 #include <unistd.h>
-#include <ctime>
 #include <iostream>
+#include <memory>
+#include <ctime>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #include <bcm_host.h>
 #include <interface/vcos/vcos.h>
@@ -35,14 +39,150 @@
 #include "camera.hpp"
 #include "encoder_config.hpp"
 
+#include "picam.pb.h"
+
+
+/**
+ * Represents a TCP connection to the receiver service. Call connect() to
+ * establish the connection.
+ */
+class ImageSender {
+  public:
+    struct Config {
+      std::string serverHostname;
+      int serverPort;
+    };
+
+    ImageSender(const Config& config)
+      : mConfig{config},
+      mConnected{false},
+      mSocket{-1}
+    { }
+
+    ~ImageSender() {
+      disconnect();
+    }
+
+    bool connect() {
+      if (mConnected) {
+        return true;
+      }
+
+      struct addrinfo hints;
+      memset(&hints, 0, sizeof(hints));
+      hints.ai_family = AF_INET;
+      hints.ai_socktype = SOCK_STREAM;
+      hints.ai_flags = 0;
+      hints.ai_protocol = 0;
+
+      struct addrinfo* result = nullptr;
+      auto port = std::to_string(mConfig.serverPort);
+      int rc = getaddrinfo(mConfig.serverHostname.c_str(), port.c_str(),
+          &hints, &result);
+      if (rc != 0) {
+        Logger::error(__func__, "%s\n", gai_strerror(rc));
+        return false;
+      }
+
+      struct addrinfo* rp = nullptr;
+      int sfd;
+      for (rp = result; rp != nullptr; rp = rp->ai_next) {
+        sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sfd == -1) {
+          continue;
+        }
+
+        if (::connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+          break;
+        }
+
+        close(sfd);
+      }
+
+      if (rp == nullptr) {
+        Logger::error(__func__, "Failed to connect\n");
+        return false;
+      }
+
+      freeaddrinfo(result);
+
+      mSocket = sfd;
+      mConnected = true;
+
+      return true;
+    }
+
+    /**
+     * Close the socket (close the TCP connection).
+     */
+    void disconnect() {
+      if (!mConnected) {
+        return;
+      }
+
+      close(mSocket);
+    }
+
+    ssize_t send(std::string& buffer) {
+      if (!mConnected) {
+        return -1;
+      }
+
+      // First send the size so the receiver knows what to expect
+      uint32_t size = htonl(buffer.size());
+      if (::send(mSocket, &size, sizeof(size), 0) < static_cast<ssize_t>(sizeof(size))) {
+        Logger::error(__func__, "Failed to send size\n");
+        return -1;
+      }
+
+      ssize_t sent = 0;
+      while (sent < static_cast<ssize_t>(buffer.size())) {
+        ssize_t rc = ::send(mSocket, buffer.data() + sent, buffer.size() - sent, 0);
+        if (rc < 0) {
+          Logger::error(__func__, "Send failed\n");
+          return -1;
+        }
+
+        sent += rc;
+      }
+
+      return sent;
+    }
+
+  private:
+    Config mConfig;
+    bool mConnected;
+    int mSocket;
+};
 
 
 static inline uint32_t align_up(uint32_t n, uint32_t alignment) {
   return ((n + alignment - 1) / alignment) * alignment;
 }
 
-size_t encoderCallback(char* pBuffer, size_t nBytes) {
-  return nBytes;
+static std::unique_ptr<ImageSender> gImageSender{nullptr};
+size_t encoderCallback(std::string& data) {
+  if (!gImageSender) {
+    Logger::warning(__func__, "ImageSender not initialized\n");
+    return 0;
+  }
+
+  // TODO assuming we always get a whole image--this is not a given
+  auto imageMessage = std::make_unique<Image>();
+  auto imageMeta = imageMessage->mutable_metadata();
+  struct timespec now{};
+  // Ignore return value
+  clock_gettime(CLOCK_REALTIME, &now);
+
+  imageMeta->set_time_s(now.tv_sec);
+  imageMeta->set_time_us(now.tv_nsec / 1000);
+
+  std::string buffer{};
+  imageMessage->SerializeToString(&buffer);
+
+  gImageSender->send(buffer);
+
+  return data.size();
 }
 
 static const int CAMERA_NUM = 0;
@@ -67,6 +207,18 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  Logger::setLogLevel(LogLevel::DEBUG);
+
+  const auto senderConfig = ImageSender::Config{
+    "gastly",
+    9000,
+  };
+  gImageSender = std::make_unique<ImageSender>(senderConfig);
+  if (!gImageSender->connect()) {
+    Logger::error("ImageSender failed to connect\n");
+    return 1;
+  }
+
   bcm_host_init();
   vcos_log_register("picam", VCOS_LOG_CATEGORY);
 
@@ -77,8 +229,6 @@ int main(int argc, char* argv[]) {
 
   //const std::pair<int, int> fps = {1, 10};
   const std::pair<int, int> fps = {0, 1};
-
-  Logger::setLogLevel(LogLevel::DEBUG);
 
 
   if (camera.open(SENSOR_MODE, CaptureMode::STILL) != MMAL_SUCCESS) {

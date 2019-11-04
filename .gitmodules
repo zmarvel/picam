@@ -1,3 +1,6 @@
 [submodule "lib/cpp-logging"]
 	path = sensor/lib/cpp-logging
 	url = https://github.com/zmarvel/cpp-logging
+[submodule "sensor/lib/toml11"]
+	path = sensor/lib/toml11
+	url = https://github.com/ToruNiina/toml11.git

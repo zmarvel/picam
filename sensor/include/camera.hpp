@@ -75,7 +75,7 @@ const int CAMERA_MAX_STILL_HEIGHT = 2464;
 class Camera {
 
   public:
-    typedef std::function<size_t(char* pBuffer, size_t nBytes)> encoderCallbackType;
+    typedef std::function<size_t(std::string& data)> encoderCallbackType;
 
     explicit Camera(int cameraNum);
     ~Camera();
