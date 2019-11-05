@@ -1,13 +1,16 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"github.com/BurntSushi/toml"
+	"github.com/golang/protobuf/proto"
+	_ "github.com/lib/pq"
 	"log"
 	"net"
 	"picam"
-	"encoding/binary"
-	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -24,12 +27,28 @@ type Config struct {
 	}
 }
 
+func (config *Config) DBString() string {
+	return fmt.Sprintf("dbname=%v user=%v password=%v host=%v sslmode=disable",
+		config.DB.Database, config.DB.User, config.DB.Password, config.DB.Host)
+}
+
 func main() {
 	// Load the config
 	var conf Config
 	_, err := toml.DecodeFile(CONFIG_PATH, &conf)
 	if err != nil {
 		log.Fatalf("Failed to read config from %v\n", CONFIG_PATH)
+	}
+
+	// Establish database connection
+	db, err := sql.Open("postgres", conf.DBString())
+	if err != nil {
+		log.Fatalf("Failed to connect to postgres %v/%v\n", conf.DB.Host,
+			conf.DB.Database)
+	}
+
+	if db.Ping() != nil {
+		log.Fatalf("Failed to ping postgres %v/%v\n", conf.DB.Host, conf.DB.Database)
 	}
 
 	// Bind to the socket
@@ -42,12 +61,12 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to accept connection\n")
 		} else {
-			go handleConnection(conn)
+			go handleConnection(db, conn)
 		}
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(db *sql.DB, conn net.Conn) {
 	log.Printf("Connection with %v established\n", conn.RemoteAddr())
 	done := false
 	for !done {
@@ -80,5 +99,16 @@ func handleConnection(conn net.Conn) {
 		if meta := imageMessage.Metadata; meta != nil {
 			fmt.Printf("Image time (%v, %v)\n", meta.TimeS, meta.TimeUs)
 		}
+
+		if imageData := imageMessage.Data; imageData != nil {
+			result, err := db.Exec("INSERT INTO images (image) VALUES (decode($1, 'base64'));",
+				base64.StdEncoding.EncodeToString(imageMessage.Data))
+			if err != nil {
+				log.Printf("Image dropped: %v\n", result)
+			} else {
+				log.Printf("Image logged (%v B)\n", len(imageMessage.Data))
+			}
+		}
 	}
+	log.Printf("Connection with %v closed\n", conn.RemoteAddr())
 }

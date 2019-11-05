@@ -2,9 +2,9 @@
 
 
 CREATE TABLE sensors (
-    id integer PRIMARY KEY,
+    id serial PRIMARY KEY,
     mac_address macaddr UNIQUE NOT NULL,
-    serial_number string UNIQUE NOT NULL,
+    serial_number char(16) UNIQUE NOT NULL
 );
 
 --CREATE TABLE sensor_positions (
@@ -15,12 +15,12 @@ CREATE TABLE sensors (
 --);
 
 CREATE TABLE images (
-    id integer PRIMARY KEY,
-    image bytea,
+    id serial PRIMARY KEY,
+    image bytea
 );
 
 CREATE TABLE image_metadata (
-    id integer PRIMARY KEY,
+    id serial PRIMARY KEY,
     image_id integer REFERENCES images (id),
     sensor_id integer REFERENCES sensors (id),
     time timestamp with time zone,
@@ -29,18 +29,18 @@ CREATE TABLE image_metadata (
     altitude real,
     width integer,
     height integer,
-    encoding string,
+    encoding char(8),
     analog_gain real,
     awb_gain_red real,
     awb_gain_blue real,
-    awb_mode string,
+    awb_mode char(16),
     brightness integer,
     contrast integer,
     digital_gain real,
-    drc_strength string,
+    drc_strength char(8),
     exposure_compensation integer,
-    exposure_mode string,
-    shutter_speed integer,
+    exposure_mode char(16),
+    exposure_speed integer,
     hflip boolean,
     image_denoise boolean,
     --image_effect string,
@@ -53,5 +53,5 @@ CREATE TABLE image_metadata (
     vflip boolean,
     --video_denoise boolean,
     --video_stabilization boolean,
-    roi box, -- AKA zoom
+    roi box -- AKA zoom
 );
