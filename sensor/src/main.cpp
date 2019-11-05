@@ -177,6 +177,8 @@ size_t encoderCallback(std::string& data) {
   imageMeta->set_time_s(now.tv_sec);
   imageMeta->set_time_us(now.tv_nsec / 1000);
 
+  imageMessage->set_data(data);
+
   std::string buffer{};
   imageMessage->SerializeToString(&buffer);
 
@@ -210,7 +212,7 @@ int main(int argc, char* argv[]) {
   Logger::setLogLevel(LogLevel::DEBUG);
 
   const auto senderConfig = ImageSender::Config{
-    "gastly",
+    "seadra",
     9000,
   };
   gImageSender = std::make_unique<ImageSender>(senderConfig);

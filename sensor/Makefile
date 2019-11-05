@@ -37,7 +37,7 @@ all: $(EXE)
 proto_defs:
 	$(MAKE) -C ../proto sensor
 
-proto/picam.pb.cpp: proto_defs
+$(SRCS): proto_defs
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<
