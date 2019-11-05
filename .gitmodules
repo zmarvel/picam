@@ -4,3 +4,12 @@
 [submodule "sensor/lib/toml11"]
 	path = sensor/lib/toml11
 	url = https://github.com/ToruNiina/toml11.git
+[submodule "receiver/src/github.com/BurntSushi/toml"]
+	path = receiver/src/github.com/BurntSushi/toml
+	url = https://github.com/BurntSushi/toml
+[submodule "receiver/src/github.com/golang/protobuf"]
+	path = receiver/src/github.com/golang/protobuf
+	url = https://github.com/golang/protobuf
+[submodule "receiver/src/github.com/lib/pq"]
+	path = receiver/src/github.com/lib/pq
+	url = https://github.com/lib/pq
