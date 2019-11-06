@@ -96,17 +96,29 @@ func handleConnection(db *sql.DB, conn net.Conn) {
 		proto.Unmarshal(buffer, &imageMessage)
 		fmt.Printf("Read Image (%v bytes)\n", size)
 		// Image is only valid with metadata
-		if meta := imageMessage.Metadata; meta != nil {
+		meta := imageMessage.Metadata
+		if meta != nil {
 			fmt.Printf("Image time (%v, %v)\n", meta.TimeS, meta.TimeUs)
 		}
 
 		if imageData := imageMessage.Data; imageData != nil {
-			result, err := db.Exec("INSERT INTO images (image) VALUES (decode($1, 'base64'));",
-				base64.StdEncoding.EncodeToString(imageMessage.Data))
+			var id int
+			err := db.QueryRow(`INSERT INTO images (image)
+			  VALUES (decode($1, 'base64'))
+			  RETURNING id;`,
+			  base64.StdEncoding.EncodeToString(imageMessage.Data)).Scan(&id)
 			if err != nil {
-				log.Printf("Image dropped: %v\n", result)
+				log.Printf("Image dropped: %v\n", err)
 			} else {
 				log.Printf("Image logged (%v B)\n", len(imageMessage.Data))
+			}
+			_, err = db.Exec(
+				`INSERT INTO image_metadata (image_id, time, width, height)
+				 VALUES ($1, to_timestamp($2::double precision / 1000000), $3, $4);`,
+				 id, int64(meta.TimeS) * 1000000 + int64(meta.TimeUs),
+				 meta.Width, meta.Height)
+			if err != nil {
+				log.Printf("Failed to log metadata: %v\n", err)
 			}
 		}
 	}

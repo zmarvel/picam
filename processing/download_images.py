@@ -31,5 +31,6 @@ if __name__ == '__main__':
             cur.execute('SELECT * FROM images')
             for result in cur:
                 out_filename = output_dir / f'{result[0]}.png'
-                Image.open(io.BytesIO(result[1])).save(out_filename)
-                print(f'Wrote {out_filename}')
+                with open(out_filename, 'wb') as f:
+                    f.write(result[1])
+                    print(f'Wrote {out_filename}')
