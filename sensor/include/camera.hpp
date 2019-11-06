@@ -91,8 +91,7 @@ class Camera {
       return mEncoder;
     }
 
-    MMAL_PORT_T* stillOutputPort() const;
-    MMAL_PORT_T* videoOutputPort() const;
+    MMAL_PORT_T* captureOutputPort() const;
     MMAL_PORT_T* encoderInputPort() const;
     MMAL_PORT_T* encoderOutputPort() const;
 
@@ -115,6 +114,8 @@ class Camera {
      * output will be connected to the encoder input) and the encoder output.
      */
     MMAL_STATUS_T enableCallbacks(encoderCallbackType encoderCallback);
+
+    MMAL_STATUS_T disableCallbacks();
 
     /**
      * Set up and enable connections. By default,
@@ -294,6 +295,7 @@ class Camera {
 
     int mCameraNum;
     SensorMode mSensorMode;
+		CaptureMode mCaptureMode;
 
     // Components
     MMAL_COMPONENT_T* mCamera;
