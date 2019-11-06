@@ -50,6 +50,8 @@ static const std::string CAMERA_NS = "Camera: ";
 
 Camera::Camera(int mCameraNum)
   : mCameraNum{mCameraNum}
+  , mSensorMode{}
+  , mCaptureMode{}
   , mCamera{nullptr}
   , mEncoder{nullptr}
   , mPreview{nullptr}
@@ -92,7 +94,7 @@ Camera::~Camera() {
   }
 }
 
-MMAL_STATUS_T Camera::open(SensorMode mSensorMode, CaptureMode captureMode) {
+MMAL_STATUS_T Camera::open(SensorMode sensorMode, CaptureMode captureMode) {
   MMAL_STATUS_T status;
 
   //
@@ -121,9 +123,7 @@ MMAL_STATUS_T Camera::open(SensorMode mSensorMode, CaptureMode captureMode) {
   }
 
   // Configure the resolution
-  status = mmal_port_parameter_set_uint32(mCamera->control,
-                                          MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
-                                          mSensorMode);
+  status = setSensorMode(sensorMode);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "failed to set sensor mode\n");
     return status;
@@ -199,13 +199,28 @@ MMAL_STATUS_T Camera::setCaptureMode(CaptureMode mode) {
     Logger::error(__func__, "Failed to create \n");
   }
 
+  mCaptureMode = mode;
+
   return status;
 }
 
+SensorMode Camera::sensorMode() const {
+  return mSensorMode;
+}
+
 MMAL_STATUS_T Camera::setSensorMode(SensorMode mode) {
+  mSensorMode = mode;
   return mmal_port_parameter_set_uint32(mCamera->control,
                                         MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
                                         mode);
+}
+
+uint32_t Camera::width() const {
+  return SENSOR_MODE_WIDTH[mSensorMode];
+}
+
+uint32_t Camera::height() const {
+  return SENSOR_MODE_HEIGHT[mSensorMode];
 }
 
 // Building with GCC 6.3.0, [[maybe_unused]] is not yet supported, even with
@@ -319,14 +334,13 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
   nBytes = buffer->length;
   imageBuffer.append(reinterpret_cast<char*>(buffer->data + buffer->offset), nBytes);
   mmal_buffer_header_mem_unlock(buffer);
-  printf("%u\n", nBytes);
 
   nRcvd += nBytes;
   if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_TRANSMISSION_FAILED) {
     Logger::warning("Buffer transmission failed\n");
     nRcvd = 0;
   } else if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
-    pCamera->mEncoderCallback(imageBuffer);
+    pCamera->mEncoderCallback(*pCamera, imageBuffer);
     imageBuffer.clear();
     Logger::info("Frame received: %u bytes\n", nRcvd);
     nRcvd = 0;
@@ -354,7 +368,7 @@ enum {
 MMAL_STATUS_T Camera::setVideoFormat(MMAL_FOURCC_T encoding,
                                      MMAL_FOURCC_T encodingVariant,
                                      const MMAL_VIDEO_FORMAT_T& videoFormat) {
-  MMAL_PORT_T* videoPort = videoOutputPort();
+  MMAL_PORT_T* videoPort = captureOutputPort();
   MMAL_ES_FORMAT_T* format = videoPort->format;
   //format->type = MMAL_ES_TYPE_VIDEO;
   format->encoding = encoding;
@@ -395,12 +409,15 @@ MMAL_STATUS_T Camera::setStillFormat(MMAL_FOURCC_T encoding,
   return mmal_port_format_commit(port);
 }
 
-MMAL_PORT_T* Camera::stillOutputPort() const {
-  return getCamera()->output[STILL_PORT];
-}
-
-MMAL_PORT_T* Camera::videoOutputPort() const {
-  return getCamera()->output[VIDEO_PORT];
+MMAL_PORT_T* Camera::captureOutputPort() const {
+  switch (mCaptureMode) {
+    case CaptureMode::VIDEO:
+      return getCamera()->output[VIDEO_PORT];
+    case CaptureMode::STILL:
+      return getCamera()->output[STILL_PORT];
+    default:
+      return nullptr;
+  }
 }
 
 MMAL_PORT_T* Camera::encoderInputPort() const {
@@ -456,30 +473,37 @@ MMAL_STATUS_T Camera::enableEncoder() {
 MMAL_STATUS_T Camera::enableCallbacks(encoderCallbackType encoderCallback) {
   MMAL_STATUS_T status;
 
-  {
-    MMAL_PORT_T* encoderOutput = encoderOutputPort();
-    encoderOutput->userdata = reinterpret_cast<MMAL_PORT_USERDATA_T*>(this);
-    status = mmal_port_enable(encoderOutput, Camera::encoderCallback);
-    if (status != MMAL_SUCCESS) {
-      Logger::error(CAMERA_NS, "Failed to set up encoder output callback\n");
-      return status;
+  encoderOutputPort()->userdata = reinterpret_cast<MMAL_PORT_USERDATA_T*>(this);
+  status = mmal_port_enable(encoderOutputPort(), Camera::encoderCallback);
+  if (status != MMAL_SUCCESS) {
+    Logger::error(__func__, "Failed to set up encoder output callback\n");
+    return status;
+  }
+  mEncoderCallback = std::move(encoderCallback);
+
+  int n = mmal_queue_length(getEncoderBufferPool()->queue);
+  for (int q = 0; q < n; q++) {
+    MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(getEncoderBufferPool()->queue);
+    if (mmal_port_send_buffer(encoderOutputPort(), buf) != MMAL_SUCCESS) {
+      Logger::warning(__func__, "Failed to send buffer to encoder output port\n");
     }
   }
-  //mEncoderCallback = std::bind(encoderCallback, std::placeholders::_1, std::placeholders::_2);
-  mEncoderCallback = std::move(encoderCallback);
 
   return status;
 }
 
+MMAL_STATUS_T Camera::disableCallbacks() {
+  return mmal_port_disable(encoderOutputPort());
+}
+
 MMAL_STATUS_T Camera::setUpConnections() {
   {
-    MMAL_PORT_T
-      * videoOutput = videoOutputPort(),
-      * encoderInput = encoderInputPort();
+    MMAL_PORT_T* encoderInput = encoderInputPort();
+    MMAL_PORT_T* captureOutput = captureOutputPort();
     MMAL_STATUS_T status;
     // video -> encoder
     status = mmal_connection_create(&mVideoEncoderConnection,
-                                    videoOutput, encoderInput,
+                                    captureOutput, encoderInput,
                                     MMAL_CONNECTION_FLAG_TUNNELLING |
                                     MMAL_CONNECTION_FLAG_ALLOCATION_ON_INPUT);
     if (status != MMAL_SUCCESS) {
@@ -560,12 +584,12 @@ MMAL_STATUS_T Camera::getColorEffect(bool& enable, uint32_t& u, uint32_t& v) {
 }
 
 MMAL_STATUS_T Camera::enableCapture() {
-  return mmal_port_parameter_set_boolean(videoOutputPort(),
+  return mmal_port_parameter_set_boolean(captureOutputPort(),
                                          MMAL_PARAMETER_CAPTURE, MMAL_TRUE);
 }
 
 MMAL_STATUS_T Camera::disableCapture() {
-  return mmal_port_parameter_set_boolean(videoOutputPort(),
+  return mmal_port_parameter_set_boolean(captureOutputPort(),
                                          MMAL_PARAMETER_CAPTURE, MMAL_FALSE);
 }
 

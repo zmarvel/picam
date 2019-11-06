@@ -109,6 +109,9 @@ class ImageSender {
       mSocket = sfd;
       mConnected = true;
 
+      Logger::info(__func__, "Successfully connected to %s:%s\n",
+          mConfig.serverHostname.c_str(), port.c_str());
+
       return true;
     }
 
@@ -161,7 +164,10 @@ static inline uint32_t align_up(uint32_t n, uint32_t alignment) {
 }
 
 static std::unique_ptr<ImageSender> gImageSender{nullptr};
-size_t encoderCallback(std::string& data) {
+static Camera* gCamera{nullptr};
+static int gFrameCount = 0;
+static bool gFrameCaptured = false;
+size_t encoderCallback(Camera& camera, std::string& data) {
   if (!gImageSender) {
     Logger::warning(__func__, "ImageSender not initialized\n");
     return 0;
@@ -176,6 +182,8 @@ size_t encoderCallback(std::string& data) {
 
   imageMeta->set_time_s(now.tv_sec);
   imageMeta->set_time_us(now.tv_nsec / 1000);
+  imageMeta->set_width(camera.width());
+  imageMeta->set_height(camera.height());
 
   imageMessage->set_data(data);
 
@@ -183,14 +191,16 @@ size_t encoderCallback(std::string& data) {
   imageMessage->SerializeToString(&buffer);
 
   gImageSender->send(buffer);
+  gFrameCount++;
+  gFrameCaptured = true;
 
   return data.size();
 }
 
 static const int CAMERA_NUM = 0;
-static const SensorMode SENSOR_MODE = SM_1920x1080;
+static const SensorMode SENSOR_MODE = SM_3280x2464_1;
+//static const SensorMode SENSOR_MODE = SM_1920x1080;
 // 17 Mbits
-static const int H264_BITRATE = 17000000;
 
 int main(int argc, char* argv[]) {
 
@@ -200,14 +210,14 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  unsigned int time = 1;
-  if (argc > 2) {
-    time = std::atoi(argv[2]);
-    // If we can't parse the time or it's invalid, reset to 1
-    if (time < 1) {
-      time = 1;
-    }
-  }
+  //unsigned int time = 1;
+  //if (argc > 2) {
+  //  time = std::atoi(argv[2]);
+  //  // If we can't parse the time or it's invalid, reset to 1
+  //  if (time < 1) {
+  //    time = 1;
+  //  }
+  //}
 
   Logger::setLogLevel(LogLevel::DEBUG);
 
@@ -223,20 +233,24 @@ int main(int argc, char* argv[]) {
 
   bcm_host_init();
   vcos_log_register("picam", VCOS_LOG_CATEGORY);
+  Logger::info("bcm_host_init complete\n");
 
   Camera camera{CAMERA_NUM};
+  gCamera = &camera;
 
   unsigned int width = SENSOR_MODE_WIDTH[SENSOR_MODE];
   unsigned int height = SENSOR_MODE_HEIGHT[SENSOR_MODE];
 
   //const std::pair<int, int> fps = {1, 10};
   const std::pair<int, int> fps = {0, 1};
+  //const std::pair<int, int> fps = {1, 6};
 
 
   if (camera.open(SENSOR_MODE, CaptureMode::STILL) != MMAL_SUCCESS) {
     Logger::error("Failed to open camera device\n");
     return 1;
   }
+  Logger::info("Camera opened in still mode\n");
 
   {
     // Set the camera config
@@ -248,7 +262,7 @@ int main(int argc, char* argv[]) {
       .max_stills_w = width,
       .max_stills_h = height,
       .stills_yuv422 = 0,
-      .one_shot_stills = 0, // continuous
+      .one_shot_stills = 1, // continuous
       .max_preview_video_w = width,
       .max_preview_video_h = height,
       .num_preview_video_frames = 3, // ??
@@ -312,9 +326,9 @@ int main(int argc, char* argv[]) {
     };
 
     // Make sure we have enough buffers
-    if (camera.videoOutputPort()->buffer_num < 3) {
-      camera.videoOutputPort()->buffer_num = 3;
-    }
+    //if (camera.videoOutputPort()->buffer_num < 3) {
+    //  camera.videoOutputPort()->buffer_num = 3;
+    //}
 
     if (camera.setVideoFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420,
                               formatInVideo)
@@ -344,7 +358,8 @@ int main(int argc, char* argv[]) {
       || (camera.setContrast(0, 1) != MMAL_SUCCESS)
       || (camera.setBrightness(50, 100) != MMAL_SUCCESS)
       || (camera.setSaturation(0, 1) != MMAL_SUCCESS)
-      || (camera.setISO(0) != MMAL_SUCCESS)
+      || (camera.setISO(800) != MMAL_SUCCESS)
+      || (camera.setShutterSpeed(60000000) != MMAL_SUCCESS)
       || (camera.setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_STILLS_CAPTURE) != MMAL_SUCCESS)) {
     Logger::error("Failed to set camera parameters\n");
     return 1;
@@ -406,34 +421,41 @@ int main(int argc, char* argv[]) {
                   );
   }
 
-  if (camera.enableCallbacks(encoderCallback) != MMAL_SUCCESS) {
-    Logger::error("Failed to enable camera callbacks\n");
-    return 1;
-  }
-
-  {
-    MMAL_PORT_T* encoderOutput = camera.encoderOutputPort();
-    int n = mmal_queue_length(camera.getEncoderBufferPool()->queue);
-    for (int q = 0; q < n; q++) {
-      MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(camera.getEncoderBufferPool()->queue);
-      if (mmal_port_send_buffer(encoderOutput, buf) != MMAL_SUCCESS) {
-        Logger::warning("Failed to send buffer to encoder output port\n");
-      }
-    }
-  }
-
-
   //
   // Now that all the ports are set up, let's capture video
   //
 
-  if (camera.enableCapture() != MMAL_SUCCESS) {
-    Logger::error("Failed to enable capture\n");
-    return 1;
+  // Wait 30 seconds, then start capture
+  for (int i = 0; i < 30; i++) {
+    vcos_sleep(1000);
   }
 
-  for (unsigned int i = 0; i < time * 10; i++) {
-    vcos_sleep(100);
+  Logger::debug("Beginning capture\n");
+
+  if (camera.enableCallbacks(encoderCallback) != MMAL_SUCCESS) {
+    Logger::error("Failed to enable callbacks\n");
+    return 1;
+  }
+  Logger::debug("Enabled callbacks\n");
+
+  //gFrameCaptured = true;
+  while (gFrameCount < 30) {
+    // Start the next capture
+    if (camera.enableCapture() != MMAL_SUCCESS) {
+      Logger::error("Failed to enable capture\n");
+      return 1;
+    }
+    Logger::debug("Enabled capture\n");
+
+    gFrameCaptured = false;
+
+    // Wait for the callback to be called, indicated a frame has been captured
+    while (!gFrameCaptured) {
+      vcos_sleep(100);
+    }
+
+    // Wait for the camera to settle
+    vcos_sleep(1000);
   }
 
   if (camera.disableCapture() != MMAL_SUCCESS) {

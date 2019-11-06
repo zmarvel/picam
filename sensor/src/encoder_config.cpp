@@ -23,12 +23,12 @@
 #include "encoder_config.hpp"
 #include "logging.hpp"
 
+static const int H264_BITRATE = 17000000;
 MMAL_STATUS_T BaseEncoderConfig::configure(MMAL_PORT_T* input,
     MMAL_PORT_T* output) {
-  MMAL_STATUS_T status = MMAL_SUCCESS;
   mmal_format_copy(output->format, input->format);
 
-  output->format->bitrate = 17000000;
+  output->format->bitrate = H264_BITRATE;
   output->format->es->video.frame_rate.num = 0;
   output->format->es->video.frame_rate.den = 1;
 
