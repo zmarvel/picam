@@ -50,6 +50,8 @@ static const std::string CAMERA_NS = "Camera: ";
 
 Camera::Camera(int mCameraNum)
   : mCameraNum{mCameraNum}
+  , mSensorMode{}
+  , mCaptureMode{}
   , mCamera{nullptr}
   , mEncoder{nullptr}
   , mPreview{nullptr}
@@ -92,7 +94,7 @@ Camera::~Camera() {
   }
 }
 
-MMAL_STATUS_T Camera::open(SensorMode mSensorMode, CaptureMode captureMode) {
+MMAL_STATUS_T Camera::open(SensorMode sensorMode, CaptureMode captureMode) {
   MMAL_STATUS_T status;
 
   //
@@ -121,9 +123,7 @@ MMAL_STATUS_T Camera::open(SensorMode mSensorMode, CaptureMode captureMode) {
   }
 
   // Configure the resolution
-  status = mmal_port_parameter_set_uint32(mCamera->control,
-                                          MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
-                                          mSensorMode);
+  status = setSensorMode(sensorMode);
   if (status != MMAL_SUCCESS) {
     Logger::error(__func__, "failed to set sensor mode\n");
     return status;
@@ -204,10 +204,23 @@ MMAL_STATUS_T Camera::setCaptureMode(CaptureMode mode) {
   return status;
 }
 
+SensorMode Camera::sensorMode() const {
+  return mSensorMode;
+}
+
 MMAL_STATUS_T Camera::setSensorMode(SensorMode mode) {
+  mSensorMode = mode;
   return mmal_port_parameter_set_uint32(mCamera->control,
                                         MMAL_PARAMETER_CAMERA_CUSTOM_SENSOR_CONFIG,
                                         mode);
+}
+
+uint32_t Camera::width() const {
+  return SENSOR_MODE_WIDTH[mSensorMode];
+}
+
+uint32_t Camera::height() const {
+  return SENSOR_MODE_HEIGHT[mSensorMode];
 }
 
 // Building with GCC 6.3.0, [[maybe_unused]] is not yet supported, even with
@@ -327,7 +340,7 @@ void Camera::encoderCallback(MMAL_PORT_T* port, MMAL_BUFFER_HEADER_T* buffer) {
     Logger::warning("Buffer transmission failed\n");
     nRcvd = 0;
   } else if (buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END) {
-    pCamera->mEncoderCallback(imageBuffer);
+    pCamera->mEncoderCallback(*pCamera, imageBuffer);
     imageBuffer.clear();
     Logger::info("Frame received: %u bytes\n", nRcvd);
     nRcvd = 0;

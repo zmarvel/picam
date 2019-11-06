@@ -75,7 +75,7 @@ const int CAMERA_MAX_STILL_HEIGHT = 2464;
 class Camera {
 
   public:
-    typedef std::function<size_t(std::string& data)> encoderCallbackType;
+    typedef std::function<size_t(Camera&, std::string& data)> encoderCallbackType;
 
     explicit Camera(int cameraNum);
     ~Camera();
@@ -132,7 +132,11 @@ class Camera {
     MMAL_STATUS_T configurePreview();
 
     MMAL_STATUS_T setCaptureMode(CaptureMode mode);
+    SensorMode sensorMode() const;
     MMAL_STATUS_T setSensorMode(SensorMode mode);
+
+    uint32_t width() const;
+    uint32_t height() const;
 
     MMAL_STATUS_T setVideoFormat(MMAL_FOURCC_T encoding,
                                  MMAL_FOURCC_T encodingVariant,
@@ -295,7 +299,7 @@ class Camera {
 
     int mCameraNum;
     SensorMode mSensorMode;
-		CaptureMode mCaptureMode;
+    CaptureMode mCaptureMode;
 
     // Components
     MMAL_COMPONENT_T* mCamera;

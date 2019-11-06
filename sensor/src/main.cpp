@@ -167,7 +167,7 @@ static std::unique_ptr<ImageSender> gImageSender{nullptr};
 static Camera* gCamera{nullptr};
 static int gFrameCount = 0;
 static bool gFrameCaptured = false;
-size_t encoderCallback(std::string& data) {
+size_t encoderCallback(Camera& camera, std::string& data) {
   if (!gImageSender) {
     Logger::warning(__func__, "ImageSender not initialized\n");
     return 0;
@@ -182,6 +182,8 @@ size_t encoderCallback(std::string& data) {
 
   imageMeta->set_time_s(now.tv_sec);
   imageMeta->set_time_us(now.tv_nsec / 1000);
+  imageMeta->set_width(camera.width());
+  imageMeta->set_height(camera.height());
 
   imageMessage->set_data(data);
 
@@ -356,8 +358,8 @@ int main(int argc, char* argv[]) {
       || (camera.setContrast(0, 1) != MMAL_SUCCESS)
       || (camera.setBrightness(50, 100) != MMAL_SUCCESS)
       || (camera.setSaturation(0, 1) != MMAL_SUCCESS)
-      || (camera.setISO(0) != MMAL_SUCCESS)
-      //|| (camera.setShutterSpeed(60000000) != MMAL_SUCCESS)
+      || (camera.setISO(800) != MMAL_SUCCESS)
+      || (camera.setShutterSpeed(60000000) != MMAL_SUCCESS)
       || (camera.setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_STILLS_CAPTURE) != MMAL_SUCCESS)) {
     Logger::error("Failed to set camera parameters\n");
     return 1;
