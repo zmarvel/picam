@@ -561,6 +561,25 @@ MMAL_STATUS_T Camera::getAWBMode(MMAL_PARAM_AWBMODE_T& mode) {
   return status;
 }
 
+MMAL_STATUS_T Camera::setAWBGains(Rational redGain, Rational blueGain){
+  MMAL_PARAMETER_AWB_GAINS_T param = {
+      .hdr = { MMAL_PARAMETER_CUSTOM_AWB_GAINS, sizeof(MMAL_PARAMETER_AWB_GAINS_T) },
+      .r_gain = redGain.toMMAL(),
+      .b_gain = blueGain.toMMAL(),
+  };
+  return mmal_port_parameter_set(mCamera->control, &param.hdr);
+}
+
+MMAL_STATUS_T Camera::getAWBGains(Rational& redGain, Rational& blueGain) {
+  MMAL_PARAMETER_AWB_GAINS_T param = {
+      .hdr = { MMAL_PARAMETER_CUSTOM_AWB_GAINS, sizeof(MMAL_PARAMETER_AWB_GAINS_T) },
+  };
+  MMAL_STATUS_T status = mmal_port_parameter_get(mCamera->control, &param.hdr);
+  redGain = Rational::fromMMAL(param.r_gain);
+  blueGain = Rational::fromMMAL(param.b_gain);
+  return status;
+}
+
 MMAL_STATUS_T Camera::setColorEffect(bool enabled, uint32_t u, uint32_t v) {
   MMAL_PARAMETER_COLOURFX_T param = {
     .hdr = { MMAL_PARAMETER_COLOUR_EFFECT, sizeof(MMAL_PARAMETER_COLOURFX_T) },
@@ -614,28 +633,64 @@ MMAL_STATUS_T Camera::setCameraConfig(const MMAL_PARAMETER_CAMERA_CONFIG_T& conf
   return mmal_port_parameter_set(mCamera->control, &config.hdr);
 }
 
-MMAL_STATUS_T Camera::setSharpness(int32_t num, int32_t den) {
+MMAL_STATUS_T Camera::setSharpness(Rational sharpness) {
   return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_SHARPNESS,
-                                          { num, den });
+                                          sharpness.toMMAL());
 }
 
-MMAL_STATUS_T Camera::setContrast(int32_t num, int32_t den) {
+MMAL_STATUS_T Camera::getSharpness(Rational& sharpness) {
+  MMAL_RATIONAL_T mmalRational;
+  MMAL_STATUS_T status = mmal_port_parameter_get_rational(mCamera->control,
+      MMAL_PARAMETER_SHARPNESS,
+      &mmalRational);
+  sharpness = Rational::fromMMAL(mmalRational);
+  return status;
+}
+
+MMAL_STATUS_T Camera::setContrast(Rational contrast) {
   return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_CONTRAST,
-                                          { num, den });
+                                          contrast.toMMAL());
 }
 
-MMAL_STATUS_T Camera::setBrightness(int32_t num, int32_t den) {
+MMAL_STATUS_T Camera::getContrast(Rational& contrast) {
+  MMAL_RATIONAL_T mmalRational;
+  MMAL_STATUS_T status =  mmal_port_parameter_get_rational(mCamera->control,
+                                          MMAL_PARAMETER_CONTRAST,
+                                          &mmalRational);
+  contrast = Rational::fromMMAL(mmalRational);
+  return status;
+}
+
+MMAL_STATUS_T Camera::setBrightness(Rational brightness) {
   return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_BRIGHTNESS,
-                                          { num, den });
+                                          brightness.toMMAL());
 }
 
-MMAL_STATUS_T Camera::setSaturation(int32_t num, int32_t den) {
+MMAL_STATUS_T Camera::getBrightness(Rational& brightness) {
+  MMAL_RATIONAL_T mmalRational;
+  MMAL_STATUS_T status = mmal_port_parameter_get_rational(mCamera->control,
+                                          MMAL_PARAMETER_BRIGHTNESS,
+                                          &mmalRational);
+  brightness = Rational::fromMMAL(mmalRational);
+  return status;
+}
+
+MMAL_STATUS_T Camera::setSaturation(Rational saturation) {
   return mmal_port_parameter_set_rational(mCamera->control,
                                           MMAL_PARAMETER_SATURATION,
-                                          { num, den });
+                                          saturation.toMMAL());
+}
+
+MMAL_STATUS_T Camera::getSaturation(Rational& saturation) {
+  MMAL_RATIONAL_T mmalRational;
+  MMAL_STATUS_T status = mmal_port_parameter_get_rational(mCamera->control,
+      MMAL_PARAMETER_SATURATION,
+      &mmalRational);
+  saturation = Rational::fromMMAL(mmalRational);
+  return status;
 }
 
 MMAL_STATUS_T Camera::setISO(uint32_t iso) {
@@ -643,9 +698,19 @@ MMAL_STATUS_T Camera::setISO(uint32_t iso) {
                                         iso);
 }
 
+MMAL_STATUS_T Camera::getISO(uint32_t& iso) {
+  return mmal_port_parameter_get_uint32(mCamera->control, MMAL_PARAMETER_ISO,
+                                        &iso);
+}
+
 MMAL_STATUS_T Camera::setShutterSpeed(uint32_t speed) {
   return mmal_port_parameter_set_uint32(mCamera->control,
                                         MMAL_PARAMETER_SHUTTER_SPEED, speed);
+}
+
+MMAL_STATUS_T Camera::getShutterSpeed(uint32_t& speed) {
+  return mmal_port_parameter_get_uint32(mCamera->control,
+                                        MMAL_PARAMETER_SHUTTER_SPEED, &speed);
 }
 
 MMAL_STATUS_T Camera::setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T useCase) {
@@ -657,4 +722,34 @@ MMAL_STATUS_T Camera::setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T useCase) {
     .use_case = useCase,
   };
   return mmal_port_parameter_set(mCamera->control, &param.hdr);
+}
+
+MMAL_STATUS_T Camera::setAnalogGain(Rational gain) {
+  return mmal_port_parameter_set_rational(mCamera->control, 
+      MMAL_PARAMETER_ANALOG_GAIN,
+      gain.toMMAL());
+}
+
+MMAL_STATUS_T Camera::getAnalogGain(Rational& gain) {
+  MMAL_RATIONAL_T mmalRational;
+  MMAL_STATUS_T status = mmal_port_parameter_get_rational(mCamera->control, 
+      MMAL_PARAMETER_ANALOG_GAIN,
+      &mmalRational);
+  gain = Rational::fromMMAL(mmalRational);
+  return status;
+}
+
+MMAL_STATUS_T Camera::setDigitalGain(Rational gain) {
+  return mmal_port_parameter_set_rational(mCamera->control, 
+      MMAL_PARAMETER_DIGITAL_GAIN,
+      gain.toMMAL());
+}
+
+MMAL_STATUS_T Camera::getDigitalGain(Rational& gain) {
+  MMAL_RATIONAL_T mmalRational;
+  MMAL_STATUS_T status = mmal_port_parameter_get_rational(mCamera->control, 
+      MMAL_PARAMETER_DIGITAL_GAIN,
+      &mmalRational);
+  gain = Rational::fromMMAL(mmalRational);
+  return status;
 }

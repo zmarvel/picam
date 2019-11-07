@@ -15,8 +15,8 @@ INCLUDES := \
 
 
 INCDIRS := $(addprefix -I,$(INCLUDES))
-CFLAGS += -Wall -MD -std=gnu99 -g $(INCDIRS)
-CXXFLAGS += -Wall -MD -std=gnu++17 -g $(INCDIRS)
+CFLAGS += -Wall -Wextra -MD -std=gnu99 -g $(INCDIRS)
+CXXFLAGS += -Wall -Wextra -MD -std=gnu++17 -g $(INCDIRS)
 
 LIBS := -lprotobuf
 LDFLAGS += -Wall -g $(LIBS)
