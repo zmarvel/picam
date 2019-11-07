@@ -66,6 +66,23 @@ const int CAMERA_MAX_STILL_WIDTH = 3280;
 const int CAMERA_MAX_STILL_HEIGHT = 2464;
 
 
+struct Rational {
+  int32_t num;
+  int32_t den;
+
+  static constexpr Rational fromMMAL(MMAL_RATIONAL_T mmalRational) {
+    return {mmalRational.num, mmalRational.den};
+  }
+
+  constexpr float toFloat() {
+    return static_cast<float>(num) / static_cast<float>(den);
+  }
+
+  constexpr MMAL_RATIONAL_T toMMAL() const {
+    return {num, den};
+  }
+};
+
 
 /**
  * Represents a Pi Camera (v2 for now).
@@ -159,6 +176,9 @@ class Camera {
     MMAL_STATUS_T setAWBMode(const MMAL_PARAM_AWBMODE_T mode);
     MMAL_STATUS_T getAWBMode(MMAL_PARAM_AWBMODE_T& mode);
 
+    MMAL_STATUS_T setAWBGains(Rational redGain, Rational blueGain);
+    MMAL_STATUS_T getAWBGains(Rational& redGain, Rational& blueGain);
+
     /**
      * Set or disable/enable the color effect. This is specified as a (u, v) pair
      * where u and v are between 0 and 255.
@@ -177,9 +197,9 @@ class Camera {
      * available.
      */
     MMAL_STATUS_T setExposureComp(int32_t comp);
-    MMAL_STATUS_T setExposureComp(int32_t num, int32_t den);
+    MMAL_STATUS_T setExposureComp(Rational comp);
     MMAL_STATUS_T getExposureComp(int32_t& comp);
-    MMAL_STATUS_T getExposureComp(int32_t& num, int32_t& den);
+    MMAL_STATUS_T getExposureComp(Rational& comp);
 
     MMAL_STATUS_T enableCapture();
     MMAL_STATUS_T disableCapture();
@@ -216,8 +236,8 @@ class Camera {
     /**
      * Set the frame rate (as a rational number).
      */
-    MMAL_STATUS_T setFrameRate(int32_t num, int32_t den);
-    MMAL_STATUS_T getFrameRate(int32_t& num, int32_t& den);
+    MMAL_STATUS_T setFrameRate(Rational frameRate);
+    MMAL_STATUS_T getFrameRate(Rational& frameRate);
 
     /**
      * Set the STC mode, one of
@@ -236,27 +256,32 @@ class Camera {
     /**
      * Set the sharpness (between -100 and 100).
      */
-    MMAL_STATUS_T setSharpness(int32_t num, int32_t den);
+    MMAL_STATUS_T setSharpness(Rational sharpness);
+    MMAL_STATUS_T getSharpness(Rational& sharpness);
 
     /**
      * Set the contrast (between -100 and 100).
      */
-    MMAL_STATUS_T setContrast(int32_t num, int32_t den);
+    MMAL_STATUS_T setContrast(Rational contrast);
+    MMAL_STATUS_T getContrast(Rational& contrast);
 
     /**
      * Set the brightness (between -100 and 100).
      */
-    MMAL_STATUS_T setBrightness(int32_t num, int32_t den);
+    MMAL_STATUS_T setBrightness(Rational brightness);
+    MMAL_STATUS_T getBrightness(Rational& brightness);
 
     /**
      * Set the saturation (between -100 and 100).
      */
-    MMAL_STATUS_T setSaturation(int32_t num, int32_t den);
+    MMAL_STATUS_T setSaturation(Rational saturation);
+    MMAL_STATUS_T getSaturation(Rational& saturation);
 
     /**
      * Set the ISO. Range is 0 to 1600, where 0 indicates "auto."
      */
     MMAL_STATUS_T setISO(uint32_t iso);
+    MMAL_STATUS_T getISO(uint32_t& iso);
 
     MMAL_STATUS_T setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T useCase);
     MMAL_STATUS_T getCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_T& useCase);
@@ -277,15 +302,15 @@ class Camera {
      * Set analog gain. Valid range is 0.0 to 8.0, with typical values between
      * 0.9 and 1.9
      */
-    void setAnalogGain(int32_t num, int32_t den);
-    void getAnalogGain(int32_t& num, int32_t& den);
+    MMAL_STATUS_T setAnalogGain(Rational gain);
+    MMAL_STATUS_T getAnalogGain(Rational& gain);
 
     /**
      * Set digital gain. Valid range is 0.0 to 8.0, with typical values between
      * 0.9 and 1.9
      */
-    void setDigitalGain(int32_t num, int32_t den);
-    void getDigitalGain(int32_t& num, int32_t& den);
+    MMAL_STATUS_T setDigitalGain(Rational gain);
+    MMAL_STATUS_T getDigitalGain(Rational& gain);
     
     encoderCallbackType encoderCallback();
 

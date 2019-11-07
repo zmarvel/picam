@@ -17,8 +17,8 @@ message Image {
         float awb_gain_red = 10;
         float awb_gain_blue = 11;
         string awb_mode = 12;
-        int32 brightness = 13;
-        int32 contrast = 14;
+        float brightness = 13;
+        float contrast = 14;
         float digital_gain = 15;
         string drc_strength = 16;
         int32 exposure_compensation = 17;
@@ -30,8 +30,8 @@ message Image {
         int32 iso = 22;
         //meter_mode string,
         int32 rotation = 23;
-        int32 saturation = 24;
-        int32 sharpness = 25;
+        float saturation = 24;
+        float sharpness = 25;
         int32 shutter_speed = 26;
         bool vflip = 27;
         //video_denoise bool,

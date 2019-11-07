@@ -163,6 +163,82 @@ static inline uint32_t align_up(uint32_t n, uint32_t alignment) {
   return ((n + alignment - 1) / alignment) * alignment;
 }
 
+MMAL_STATUS_T getImageMetadata(Image::Metadata& imageMeta, Camera& camera) {
+  struct timespec now{};
+  // Ignore return value
+  clock_gettime(CLOCK_REALTIME, &now);
+
+  imageMeta.set_time_s(now.tv_sec);
+  imageMeta.set_time_us(now.tv_nsec / 1000);
+  imageMeta.set_width(camera.width());
+  imageMeta.set_height(camera.height());
+  imageMeta.set_encoding("PNG");
+
+#define GET_SET_OR_RETURN(get, set) {\
+    MMAL_STATUS_T status = get; \
+    if (status != MMAL_SUCCESS) {\
+      return status;\
+    }\
+    set; \
+  }
+
+  Rational analogGain, digitalGain;
+  GET_SET_OR_RETURN(camera.getAnalogGain(analogGain),
+      imageMeta.set_analog_gain(analogGain.toFloat()));
+  GET_SET_OR_RETURN(camera.getDigitalGain(digitalGain),
+      imageMeta.set_digital_gain(digitalGain.toFloat()));
+
+  Rational redGain, blueGain;
+  {
+    MMAL_STATUS_T status = camera.getAWBGains(redGain, blueGain);
+    if (status != MMAL_SUCCESS) {
+      return status;
+    }
+    imageMeta.set_awb_gain_red(redGain.toFloat());
+    imageMeta.set_awb_gain_blue(blueGain.toFloat());
+  }
+  //imageMeta.set_awb_mode();
+  //imageMeta.set_exposure_mode();
+  //imageMeta.set_exposure_compensation();
+  //imageMeta.set_exposure_speed();
+  //imageMeta.set_hflip();
+  //imageMeta.set_image_denoise();
+  
+  uint32_t iso;
+  GET_SET_OR_RETURN(camera.getISO(iso),
+      imageMeta.set_iso(iso));
+
+  //imageMeta.set_rotation();
+
+  Rational brightness;
+  GET_SET_OR_RETURN(camera.getBrightness(brightness),
+      imageMeta.set_brightness(brightness.toFloat()));
+
+  Rational contrast;
+  GET_SET_OR_RETURN(camera.getContrast(contrast),
+      imageMeta.set_contrast(contrast.toFloat()));
+
+  Rational saturation;
+  GET_SET_OR_RETURN(camera.getSaturation(saturation),
+      imageMeta.set_saturation(saturation.toFloat()));
+
+  Rational sharpness;
+  GET_SET_OR_RETURN(camera.getSharpness(sharpness),
+      imageMeta.set_sharpness(sharpness.toFloat()));
+
+  uint32_t shutterSpeed;
+  GET_SET_OR_RETURN(camera.getShutterSpeed(shutterSpeed),
+      imageMeta.set_shutter_speed(shutterSpeed));
+
+  //imageMeta.set_vflip();
+
+  //imageMeta.set_roi_x();
+  //imageMeta.set_roi_y();
+  //imageMeta.set_roi_w();
+  //imageMeta.set_roi_h();
+#undef GET_SET_OR_RETURN
+}
+
 static std::unique_ptr<ImageSender> gImageSender{nullptr};
 static Camera* gCamera{nullptr};
 static int gFrameCount = 0;
@@ -176,14 +252,8 @@ size_t encoderCallback(Camera& camera, std::string& data) {
   // TODO assuming we always get a whole image--this is not a given
   auto imageMessage = std::make_unique<Image>();
   auto imageMeta = imageMessage->mutable_metadata();
-  struct timespec now{};
-  // Ignore return value
-  clock_gettime(CLOCK_REALTIME, &now);
 
-  imageMeta->set_time_s(now.tv_sec);
-  imageMeta->set_time_us(now.tv_nsec / 1000);
-  imageMeta->set_width(camera.width());
-  imageMeta->set_height(camera.height());
+  getImageMetadata(*imageMeta, camera);
 
   imageMessage->set_data(data);
 
@@ -205,10 +275,12 @@ static const SensorMode SENSOR_MODE = SM_3280x2464_1;
 int main(int argc, char* argv[]) {
 
   if (argc < 2) {
-    std::cout << "USAGE: " << argv[0] << " <output file> [<record time in s>]"
+    std::cout << "USAGE: " << argv[0] << " <frame_count>"
       << std::endl;
     return 1;
   }
+
+  int frameCount = std::atoi(argv[1]);
 
   //unsigned int time = 1;
   //if (argc > 2) {
@@ -242,7 +314,7 @@ int main(int argc, char* argv[]) {
   unsigned int height = SENSOR_MODE_HEIGHT[SENSOR_MODE];
 
   //const std::pair<int, int> fps = {1, 10};
-  const std::pair<int, int> fps = {0, 1};
+  const Rational fps{0, 1};
   //const std::pair<int, int> fps = {1, 6};
 
 
@@ -284,7 +356,7 @@ int main(int argc, char* argv[]) {
       .width = align_up(width, 32),
       .height = align_up(height, 16),
       .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { fps.first, fps.second },
+      .frame_rate = fps.toMMAL(),
     };
 
     if (camera.setPreviewFormat(MMAL_ENCODING_OPAQUE, MMAL_ENCODING_I420, formatIn)
@@ -322,7 +394,7 @@ int main(int argc, char* argv[]) {
       .width = align_up(width, 32),
       .height = align_up(height, 16),
       .crop = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) },
-      .frame_rate = { fps.first, fps.second },
+      .frame_rate = fps.toMMAL(),
     };
 
     // Make sure we have enough buffers
@@ -354,10 +426,10 @@ int main(int argc, char* argv[]) {
       (camera.setAWBMode(MMAL_PARAM_AWBMODE_AUTO) != MMAL_SUCCESS)
       || (camera.setExposureMode(MMAL_PARAM_EXPOSUREMODE_NIGHT) != MMAL_SUCCESS)
       //|| (camera.setExposureMode(MMAL_PARAM_EXPOSUREMODE_AUTO) != MMAL_SUCCESS)
-      || (camera.setSharpness(0, 1) != MMAL_SUCCESS)
-      || (camera.setContrast(0, 1) != MMAL_SUCCESS)
-      || (camera.setBrightness(50, 100) != MMAL_SUCCESS)
-      || (camera.setSaturation(0, 1) != MMAL_SUCCESS)
+      || (camera.setSharpness({0, 1}) != MMAL_SUCCESS)
+      || (camera.setContrast({0, 1}) != MMAL_SUCCESS)
+      || (camera.setBrightness({50, 100}) != MMAL_SUCCESS)
+      || (camera.setSaturation({0, 1}) != MMAL_SUCCESS)
       || (camera.setISO(800) != MMAL_SUCCESS)
       || (camera.setShutterSpeed(60000000) != MMAL_SUCCESS)
       || (camera.setCameraUseCase(MMAL_PARAM_CAMERA_USE_CASE_STILLS_CAPTURE) != MMAL_SUCCESS)) {
@@ -439,7 +511,7 @@ int main(int argc, char* argv[]) {
   Logger::debug("Enabled callbacks\n");
 
   //gFrameCaptured = true;
-  while (gFrameCount < 30) {
+  while (gFrameCount < frameCount) {
     // Start the next capture
     if (camera.enableCapture() != MMAL_SUCCESS) {
       Logger::error("Failed to enable capture\n");
