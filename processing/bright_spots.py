@@ -38,6 +38,7 @@ down[down < 0] = 0
 
 
 edges = left + right + up + down
+edges = np.ma.array(edges, mask=edges < 75)
 #edges.set_fill_value(0)
 
 
@@ -47,18 +48,78 @@ edges = left + right + up + down
 import matplotlib.pyplot as plt
 
 #plt.subplots(figsize=(20,20))
-img = plt.imshow(np.ma.array(edges, mask=edges < 75).filled(0), cmap='gray')
-
-plt.show()
-
-
+edges_filled = edges.filled(0)
+img = plt.imshow(edges_filled, cmap='gray')
 
 # Flood fill
 
+# flood stores a color number, so different regions are filled with different
+# colors
+flood = np.zeros(edges.shape)
+
+def is_in_bounds(mat, row, col):
+    return row > 0 and row < mat.shape[0] - 1 and col > 0 and col < mat.shape[1] - 1
+
+NEIGHBORS = (
+    (-1, 0),
+    (1, 0),
+    (0, -1),
+    (0, 1),
+    (-1, -1),
+    (-1, 1),
+    (1, 1),
+    (1, -1),
+)
+def flood_fill(fill_color, mat, out, start):
+    q = [start]
+    while len(q) > 0:
+        row, col = q.pop()
+        if mat[row][col] > 0:
+            out[row][col] = fill_color
+
+        for dr, dc in zip(range(-2, 2), range(-2, 2)):
+        #for dr, dc in NEIGHBORS:
+            r, c = (row+dr, col+dc)
+            if is_in_bounds(mat, r, c) and out[r][c] == 0 and mat[r][c] > 0:
+                q.append((r, c))
+
+flood_test = np.array([
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+])
+
+flood_test_out = np.zeros((8, 8))
+
+#flood_fill(1, flood_test, flood_test_out, (2, 2))
+#print(flood_test_out)
+
+#fill_color = np.array([0xff, 0, 0, 0xff])
+#flooded = np.zeros((*flood.shape, 4))
+fill_color = 1
+
+for r in range(edges_filled.shape[0]):
+    for c in range(edges_filled.shape[1]):
+        # If the cell is above the threshold and has not already been seen,
+        # run flood_fill on it
+        if not edges.mask[r][c] and flood[r][c] == 0:
+            flood_fill(fill_color, edges_filled, flood, (r, c))
+            fill_color += 1
+
+print(f'Filled {fill_color} distinct regions')
+
+#flood_fill(1, edges_filled, flood, (264, 269))
 
 
-# In[ ]:
 
 
 
 
+plt.imshow(flood, cmap='gist_ncar')
+
+plt.show()
