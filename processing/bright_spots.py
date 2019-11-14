@@ -15,18 +15,38 @@ unprocessed_rgb = np.delete(unprocessed_rgb, 3, 2)
 unprocessed = unprocessed_rgb.sum(axis=2, dtype=np.float)
 
 
-edges_filled = edges.filled(0)
-img = plt.imshow(edges_filled, cmap='gray')
+#img = plt.imshow(unprocessed, cmap='gray')
+#plt.show()
 
 
 # Blur the image to detect bright regions
 
+def distance(x1, x2):
+    return np.sqrt(x1*x1 + x2*x2)
+
+
 def gaussian(mu, sigma, xs):
-    return (1 / np.sqrt(2 * )) np.exp()
+    return (1 / np.sqrt(2 * pi * sigma**2)) * np.exp(-(xs - mu)**2 / 2*sigma**2)
 
-kernel = np.array([
-])
+kernel_size = 19
 
+xs = np.zeros((kernel_size, kernel_size))
+for row in range(kernel_size):
+    for col in range(kernel_size):
+        xs[row][col] = distance(kernel_size // 2 - row, kernel_size // 2 - col)
+
+kernel = gaussian(0, 0.5, xs)
+
+#plt.imshow(kernel)
+#plt.show()
+
+ax = plt.subplot(1, 2, 1)
+ax.imshow(unprocessed)
+
+blurred = spsig.convolve2d(unprocessed, kernel)
+ax = plt.subplot(1, 2, 2)
+ax.imshow(blurred)
+plt.show()
 
 
 # Flood fill
