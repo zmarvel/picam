@@ -1,0 +1,5 @@
+469_bright_region.png filter=lfs diff=lfs merge=lfs -text
+469.png filter=lfs diff=lfs merge=lfs -text
+469_smaller_cropped.png filter=lfs diff=lfs merge=lfs -text
+469_smaller.png filter=lfs diff=lfs merge=lfs -text
+469_bright_region_filled.png filter=lfs diff=lfs merge=lfs -text
