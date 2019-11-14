@@ -1,55 +1,33 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[11]:
 
+from math import pi
 
 import numpy as np
 from PIL import Image
-
-unprocessed_rgb = np.array(Image.open('./out/469_bright_region.png'))
-
-
-# In[12]:
+import matplotlib.pyplot as plt
+import scipy.signal as spsig
 
 
-unprocessed_rgb = np.delete(unprocessed_rgb, 3, 2) 
+unprocessed_rgb = np.array(Image.open('./out/469_smaller.png'))
+unprocessed_rgb = np.delete(unprocessed_rgb, 3, 2)
 unprocessed = unprocessed_rgb.sum(axis=2, dtype=np.float)
 
 
-# In[38]:
-
-
-center = unprocessed[1:-1,1:-1]
-left = center - unprocessed[1:-1,0:-2]
-left[left < 0] = 0
-
-right = center - unprocessed[1:-1,2:]
-right[right < 0] = 0
-
-up = center - unprocessed[0:-2,1:-1]
-up[up < 0] = 0
-
-down = center - unprocessed[2:,1:-1]
-down[down < 0] = 0
-
-
-# In[39]:
-
-
-edges = left + right + up + down
-edges = np.ma.array(edges, mask=edges < 75)
-#edges.set_fill_value(0)
-
-
-# In[41]:
-
-
-import matplotlib.pyplot as plt
-
-#plt.subplots(figsize=(20,20))
 edges_filled = edges.filled(0)
 img = plt.imshow(edges_filled, cmap='gray')
+
+
+# Blur the image to detect bright regions
+
+def gaussian(mu, sigma, xs):
+    return (1 / np.sqrt(2 * )) np.exp()
+
+kernel = np.array([
+])
+
+
 
 # Flood fill
 
