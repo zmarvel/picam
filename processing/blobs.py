@@ -4,6 +4,7 @@
 
 import argparse as ap
 from math import pi, sqrt, exp
+import itertools as it
 
 import numpy as np
 from PIL import Image
@@ -14,6 +15,7 @@ import scipy.signal as spsignal
 parser = ap.ArgumentParser()
 parser.add_argument('input_file', nargs='?', default='./out/469_smaller_cropped.png')
 parser.add_argument('-c', '--color-map', default='gray')
+parser.add_argument('-o', '--output-file')
 
 args = parser.parse_args()
 
@@ -51,7 +53,7 @@ def flood_fill(fill_color, mat, out, start):
         if mat[row][col] > 0:
             out[row][col] = fill_color
 
-        for dr, dc in zip(range(-2, 2), range(-2, 2)):
+        for dr, dc in it.combinations(range(-2, 2), 2):
         #for dr, dc in NEIGHBORS:
             r, c = (row+dr, col+dc)
             if is_in_bounds(mat, r, c) and out[r][c] == 0 and mat[r][c] > 0:
@@ -75,4 +77,7 @@ ax.imshow(flood, cmap='gist_ncar')
 #ax = plt.subplot(1, 2, 2)
 #ax.imshow(blurred, cmap=args.color_map)
 
-plt.show()
+if args.output_file:
+    plt.savefig(args.output_file, dpi=800)
+else:
+    plt.show()
