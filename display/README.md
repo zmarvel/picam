@@ -1,0 +1,1 @@
+qtdeclarative5-dev

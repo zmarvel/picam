@@ -1,0 +1,12 @@
+<RCC>
+  <qresource prefix="tango">
+    <file>icons/playback-pause.svg</file>
+    <file>icons/playback-start.svg</file>
+    <file>icons/playback-stop.svg</file>
+  </qresource>
+
+  <qresource prefix="/">
+    <file>main.qml</file>
+    <file>VideoPlayer.qml</file>
+  </qresource>
+</RCC>

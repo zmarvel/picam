@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>718</width>
+    <height>591</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <widget class="QWidget" name="verticalLayoutWidget">
+   <property name="geometry">
+    <rect>
+     <x>180</x>
+     <y>60</y>
+     <width>202</width>
+     <height>126</height>
+    </rect>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QToolButton" name="toolButton">
+        <property name="text">
+         <string>...</string>
+        </property>
+        <property name="icon">
+         <iconset resource="theme.qrc">
+          <normaloff>:/tango/tango-icon-theme/scalable/actions/media-playback-start.svg</normaloff>:/tango/tango-icon-theme/scalable/actions/media-playback-start.svg</iconset>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="toolButton_2">
+        <property name="text">
+         <string>...</string>
+        </property>
+        <property name="icon">
+         <iconset resource="theme.qrc">
+          <normaloff>:/tango/tango-icon-theme/scalable/actions/media-playback-pause.svg</normaloff>:/tango/tango-icon-theme/scalable/actions/media-playback-pause.svg</iconset>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="toolButton_3">
+        <property name="text">
+         <string>...</string>
+        </property>
+        <property name="icon">
+         <iconset resource="theme.qrc">
+          <normaloff>:/tango/tango-icon-theme/scalable/actions/media-playback-stop.svg</normaloff>:/tango/tango-icon-theme/scalable/actions/media-playback-stop.svg</iconset>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSlider" name="horizontalSlider">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources>
+  <include location="theme.qrc"/>
+ </resources>
+ <connections/>
+</ui>

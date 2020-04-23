@@ -13,3 +13,6 @@
 [submodule "receiver/src/github.com/lib/pq"]
 	path = receiver/src/github.com/lib/pq
 	url = https://github.com/lib/pq
+[submodule "pipeline/lib/zmqpp"]
+	path = pipeline/lib/zmqpp
+	url = https://github.com/zeromq/zmqpp.git
