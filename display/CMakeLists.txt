@@ -12,7 +12,7 @@ set(QT_COMPONENTS
 find_package(Qt5 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 find_package(Qt5QuickCompiler)
 
-qtquick_compiler_add_resources(RESOURCES qml.qrc)
+qtquick_compiler_add_resources(RESOURCES qml.qrc icons.qrc)
 
 add_executable(picam_display
     main.cpp ${RESOURCES}
