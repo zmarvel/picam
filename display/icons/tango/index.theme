@@ -1,0 +1,9 @@
+[Icon Theme]
+Name=tango
+Comment=Tango Icon Theme
+
+Directories=scalable
+
+[scalable]
+Size=256
+Type=Scalable

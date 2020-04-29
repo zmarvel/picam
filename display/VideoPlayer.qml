@@ -10,15 +10,15 @@ ColumnLayout {
         Layout.fillWidth: true
 
         Button {
-            icon.name: "qrc:/tango/icons/media-playback-start.svg"
+            icon.name: "media-playback-start"
         }
 
         Button {
-            icon.name: "qrc:/tango/icons/media-playback-pause.svg"
+            icon.name: "media-playback-pause"
         }
 
         Button {
-            icon.name: "qrc:/tango/icons/media-playback-stop.svg"
+            icon.name: "media-playback-stop"
         }
 
         Slider {
