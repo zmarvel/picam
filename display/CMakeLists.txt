@@ -7,7 +7,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 set(QT_COMPONENTS
-  Core Widgets Quick Network)
+  Core Widgets Quick Network Multimedia)
 
 find_package(Qt5 COMPONENTS ${QT_COMPONENTS} REQUIRED)
 find_package(Qt5QuickCompiler)
