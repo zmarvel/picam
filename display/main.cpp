@@ -13,6 +13,8 @@ int main(int argc, char* argv[]) {
 
   QGuiApplication app{argc, argv};
 
+  qmlRegisterType<VideoSource>("com.zackmarvel.picam", 1, 0, "VideoSource");
+
   QIcon::setThemeName("tango");
 
   QQmlApplicationEngine engine{};

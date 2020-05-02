@@ -15,7 +15,7 @@ find_package(Qt5QuickCompiler)
 qtquick_compiler_add_resources(RESOURCES qml.qrc icons/icons.qrc)
 
 add_executable(picam_display
-    main.cpp ${RESOURCES}
+  VideoSource.cpp main.cpp ${RESOURCES}
 )
 
 qt5_use_modules(picam_display ${QT_COMPONENTS})
