@@ -1,15 +1,15 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/golang/protobuf/proto"
-	_ "github.com/lib/pq"
 	"log"
 	"net"
+	"os"
+	"time"
+	"path"
 	"picam"
 )
 
@@ -24,6 +24,10 @@ type Config struct {
 		User     string
 		Password string
 		Host     string
+	}
+
+	Log struct {
+		Path string
 	}
 }
 
@@ -40,15 +44,9 @@ func main() {
 		log.Fatalf("Failed to read config from %v\n", CONFIG_PATH)
 	}
 
-	// Establish database connection
-	db, err := sql.Open("postgres", conf.DBString())
-	if err != nil {
-		log.Fatalf("Failed to connect to postgres %v/%v\n", conf.DB.Host,
-			conf.DB.Database)
-	}
-
-	if db.Ping() != nil {
-		log.Fatalf("Failed to ping postgres %v/%v\n", conf.DB.Host, conf.DB.Database)
+	info, err := os.Stat(conf.Log.Path)
+	if err != nil || !info.IsDir() {
+		log.Fatalf("Log directory does not exist: %v\n", conf.Log.Path)
 	}
 
 	// Bind to the socket
@@ -61,12 +59,12 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to accept connection\n")
 		} else {
-			go handleConnection(db, conn)
+			go handleConnection(conf.Log.Path, conn)
 		}
 	}
 }
 
-func handleConnection(db *sql.DB, conn net.Conn) {
+func handleConnection(logDir string, conn net.Conn) {
 	log.Printf("Connection with %v established\n", conn.RemoteAddr())
 	done := false
 	for !done {
@@ -102,25 +100,23 @@ func handleConnection(db *sql.DB, conn net.Conn) {
 		}
 
 		if imageData := imageMessage.Data; imageData != nil {
-			var id int
-			err := db.QueryRow(`INSERT INTO images (image)
-			  VALUES (decode($1, 'base64'))
-			  RETURNING id;`,
-			  base64.StdEncoding.EncodeToString(imageMessage.Data)).Scan(&id)
 			if err != nil {
-				log.Printf("Image dropped: %v\n", err)
-			} else {
-				log.Printf("Image logged (%v B)\n", len(imageMessage.Data))
+				logFile, err := os.Create(path.Join(logDir, fmt.Sprintf("%d.%06d.fits",
+						meta.TimeS, meta.TimeUs)))
+				defer logFile.Close()
+				if err != nil {
+				}
 			}
-			_, err = db.Exec(
-				`INSERT INTO image_metadata (image_id, time, width, height)
-				 VALUES ($1, to_timestamp($2::double precision / 1000000), $3, $4);`,
-				 id, int64(meta.TimeS) * 1000000 + int64(meta.TimeUs),
-				 meta.Width, meta.Height)
-			if err != nil {
-				log.Printf("Failed to log metadata: %v\n", err)
-			}
+
 		}
 	}
 	log.Printf("Connection with %v closed\n", conn.RemoteAddr())
+}
+
+func logImage(logDir string, image *ImageMessage) (string, err error) {
+	meta := image.Metadata
+	timestamp := time.Unix(meta.TimeS, 1000 * meta.TimeUs)
+	subdir := path.Join(timestamp.format("2006-01-02"))
+	subdirInfo, err := os.Stat(subdir)
+	// if (err == nil && subdirInfo
 }
