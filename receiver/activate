@@ -1,0 +1,6 @@
+
+root=$(pwd)
+if [[ $(basename ${root}) != "receiver" ]]; then
+    root="$(find -maxdepth 2 -type d -name receiver)"
+fi
+export GOPATH="${root}"

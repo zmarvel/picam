@@ -1,1 +1,3 @@
 receiver
+bin/
+pkg/

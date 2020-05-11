@@ -19,6 +19,10 @@ const (
 )
 
 type Config struct {
+	Server struct {
+		Port int
+	}
+
 	DB struct {
 		Database string
 		User     string
@@ -50,7 +54,7 @@ func main() {
 	}
 
 	// Bind to the socket
-	sock, err := net.Listen("tcp", fmt.Sprintf(":%v", PORT))
+	sock, err := net.Listen("tcp", fmt.Sprintf(":%v", conf.Server.Port))
 	if err != nil {
 		log.Fatalf("Failed to bind to port %v\n", PORT)
 	}
@@ -113,10 +117,54 @@ func handleConnection(logDir string, conn net.Conn) {
 	log.Printf("Connection with %v closed\n", conn.RemoteAddr())
 }
 
-func logImage(logDir string, image *ImageMessage) (string, err error) {
+func logImage(logDir string, image *picam.Image) (string, error) {
 	meta := image.Metadata
 	timestamp := time.Unix(meta.TimeS, 1000 * meta.TimeUs)
-	subdir := path.Join(timestamp.format("2006-01-02"))
+	subdir := path.Join(formatDayDir(timestamp))
+
+	// Check if the day's directory already exists. If it does exist, make sure
+	// it's a directory. Otherwise, if it doesn't exist, create it.
 	subdirInfo, err := os.Stat(subdir)
-	// if (err == nil && subdirInfo
+	if (err == nil && !subdirInfo.IsDir()) {
+		// The file exists but isn't a directory--we can't proceed
+		return "", fmt.Errorf("logImage: %s exists but is not a directory", subdir)
+	} else if (os.IsExist(err)) {
+		// The directory doesn't exist--create it!
+		err := os.Mkdir(subdir, 0755)
+		if (err != nil) {
+			return "", fmt.Errorf("logImage: failed to create directory at %s", subdir)
+		}
+	}
+
+	// Log the image and its metadata in the day's directory.
+	imgFilename := path.Join(subdir, formatImageFilename(timestamp))
+	// imgFile, err := os.Create(imgFilename)
+	_, err = os.Create(imgFilename)
+	if (err != nil) {
+		return "", fmt.Errorf("logImage: failed to create image file at %s",
+			imgFilename)
+	}
+	metaFilename := path.Join(subdir, formatMetaFilename(timestamp))
+	// metaFile, err := os.Create(metaFilename)
+	_, err = os.Create(metaFilename)
+	if (err != nil) {
+		return "", fmt.Errorf("logImage: failed to create metadata file at %s",
+			metaFilename)
+	}
+
+	
+
+	return imgFilename, nil
+}
+
+func formatDayDir(tm time.Time) string {
+	return tm.Format("2006-01-02")
+}
+
+func formatImageFilename(tm time.Time) string {
+	return tm.Format("150405.000.png")
+}
+
+func formatMetaFilename(tm time.Time) string {
+	return tm.Format("150405.000.json")
 }

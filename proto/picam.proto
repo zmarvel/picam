@@ -5,8 +5,8 @@ syntax = "proto3";
 // awb_mode)
 message Image {
     message Metadata {
-        int32 time_s = 1;
-        int32 time_us = 2;
+        int64 time_s = 1;
+        int64 time_us = 2;
         float latitude = 3;
         float longitude = 4;
         float altitude = 5;
