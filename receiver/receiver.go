@@ -37,12 +37,13 @@ type Config struct {
 
 	Log struct {
 		Path string
-		MaxSize string
+		MaxSize string `toml:"max_size"`
 	}
 }
 
 // Translate the max_size field in the config into a size in bytes
-func (config *Config) ParseMaxSize() (uint64, error) {
+func (config *Config) ParseMaxSize() (int64, error) {
+	fmt.Printf("MaxSize: %s\n", config.Log.MaxSize)
 	spacesRemoved := strings.Replace(config.Log.MaxSize, " ", "", 0)
 	var sizeBuilder strings.Builder
 	var unitBuilder strings.Builder
@@ -52,7 +53,7 @@ func (config *Config) ParseMaxSize() (uint64, error) {
 			if err != nil {
 				return 0, fmt.Errorf("ParseMaxSize: %v", err)
 			}
-		} else if unitBuilder.Len() > 0 && unicode.IsLetter(r) {
+		} else if sizeBuilder.Len() > 0 && unicode.IsLetter(r) {
 			_, err := unitBuilder.WriteRune(r)
 			if err != nil {
 				return 0, fmt.Errorf("ParseMaxSize: %v", err)
@@ -74,8 +75,8 @@ func (config *Config) ParseMaxSize() (uint64, error) {
 
 	sizeNum, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		return 0, fmt.Errorf("ParseMaxSize: Unable to convert size to number: %v",
-			err)
+		return 0, fmt.Errorf(
+			"ParseMaxSize: Unable to convert size to number: %v", err)
 	}
 
 	if unitStr == "k" {
@@ -88,7 +89,7 @@ func (config *Config) ParseMaxSize() (uint64, error) {
 		return 0, fmt.Errorf("ParseMaxSize: Unrecognized unit %s", unitStr)
 	}
 
-	return uint64(sizeNum), nil
+	return int64(sizeNum), nil
 }
 
 func main() {
@@ -103,6 +104,10 @@ func main() {
 	if err != nil || !info.IsDir() {
 		log.Fatalf("Log directory does not exist: %v\n", conf.Log.Path)
 	}
+
+	monitorTicker := time.NewTicker(5 * time.Second)
+	defer monitorTicker.Stop()
+	go monitorUsage(&conf, monitorTicker.C)
 
 	// Bind to the socket
 	sock, err := net.Listen("tcp", fmt.Sprintf(":%v", conf.Server.Port))
@@ -167,7 +172,7 @@ func logImage(logDir string, image *picam.Image) (string, error) {
 	}
 
 	timestamp := time.Unix(meta.TimeS, 1000 * meta.TimeUs)
-	subdir := path.Join(formatDayDir(timestamp))
+	subdir := path.Join(logDir, formatDayDir(timestamp))
 
 	// Check if the day's directory already exists. If it does exist, make sure
 	// it's a directory. Otherwise, if it doesn't exist, create it.
@@ -175,7 +180,7 @@ func logImage(logDir string, image *picam.Image) (string, error) {
 	if err == nil && !subdirInfo.IsDir() {
 		// The file exists but isn't a directory--we can't proceed
 		return "", fmt.Errorf("logImage: %s exists but is not a directory", subdir)
-	} else if (os.IsExist(err)) {
+	} else if os.IsNotExist(err) {
 		// The directory doesn't exist--create it!
 		err := os.Mkdir(subdir, 0755)
 		if err != nil {
@@ -188,8 +193,8 @@ func logImage(logDir string, image *picam.Image) (string, error) {
 	imgFile, err := os.Create(imgFilename)
 	defer imgFile.Close()
 	if err != nil {
-		return "", fmt.Errorf("logImage: failed to create image file at %s",
-			imgFilename)
+		return "", fmt.Errorf("logImage: failed to create image file at %s: %v",
+			imgFilename, err)
 	}
 	metaFilename := path.Join(subdir, formatMetaFilename(timestamp))
 	metaFile, err := os.Create(metaFilename)
@@ -221,12 +226,75 @@ func formatDayDir(tm time.Time) string {
 	return tm.Format("2006-01-02")
 }
 
+func parseDayDir(name string) (time.Time, error) {
+	return time.Parse("2006-01-02", name)
+}
+
 func formatImageFilename(tm time.Time) string {
 	return tm.Format("150405.000.png")
 }
 
 func formatMetaFilename(tm time.Time) string {
 	return tm.Format("150405.000.json")
+}
+
+func monitorUsage(config *Config, tick <-chan time.Time) {
+	maxSize, err := config.ParseMaxSize()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	log.Printf("MaxSize: %d", maxSize)
+
+	for {
+		_ = <-tick
+
+		logdir := config.Log.Path
+		size, err := DiskUsage(logdir)
+		if err != nil {
+			// log it and continue
+			log.Printf("monitorUsage: %v", err)
+			continue
+		}
+
+		if size > maxSize {
+			// find the oldest directory and delete it
+			dir, err := os.Open(logdir)
+			if err != nil {
+				log.Printf("monitorUsage: %v", err)
+				// log it and continue
+				continue
+			}
+
+			oldest := time.Now()
+			infos, err := dir.Readdir(0)
+			if err != nil {
+				log.Printf("monitorUsage: %v", err)
+				continue
+			}
+
+			for _, info := range infos {
+				if info.IsDir() {
+					tm, err := parseDayDir(info.Name())
+					if err != nil {
+						log.Printf("%v", err)
+						// It's possible that there are directories here other than the log
+						// directories--skip them over.
+						continue
+					}
+
+					if tm.Before(oldest) {
+						oldest = tm
+					}
+				}
+			}
+
+			oldestDir := path.Join(logdir, formatDayDir(oldest))
+			err = os.RemoveAll(oldestDir)
+			if err != nil {
+				log.Printf("%v", err)
+			}
+		}
+	}
 }
 
 // Recursively calculate the space occupied by a directory
@@ -237,7 +305,7 @@ func DiskUsage(dirPath string) (int64, error) {
 	}
 
 	infos, err := dir.Readdir(0)
-	if err == io.EOF {
+	if err == io.EOF || err == nil {
 		dirInfo, err := dir.Stat()
 		if err != nil {
 			return 0, fmt.Errorf("DiskUsage: Failed to stat directory: %v", err)
@@ -258,9 +326,7 @@ func DiskUsage(dirPath string) (int64, error) {
 			}
 		}
 		return sum, nil
-	} else if err != nil {
-		return 0, fmt.Errorf("DiskUsage: Failed to scan directory: %v", err)
 	} else {
-		return 0, fmt.Errorf("DiskUsage: EOF expected!")
+		return 0, fmt.Errorf("DiskUsage: Failed to scan directory: %v", err)
 	}
 }
